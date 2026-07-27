@@ -7,6 +7,7 @@ import (
 	"maps"
 	"strings"
 
+	"github.com/mhsanaei/3x-ui/v3/internal/database"
 	"github.com/mhsanaei/3x-ui/v3/internal/database/model"
 	"github.com/mhsanaei/3x-ui/v3/internal/util/json_util"
 	"github.com/mhsanaei/3x-ui/v3/internal/util/random"
@@ -118,6 +119,10 @@ func (s *SubJsonService) GetJson(subId string, host string) (string, string, err
 	if len(configArray) == 0 {
 		return "", "", nil
 	}
+	configArray, err = applyDirectRulesToJSONSubscription(subReq, subId, host, configArray)
+	if err != nil {
+		return "", "", err
+	}
 
 	emails := make([]string, 0, len(seenEmails))
 	for e := range seenEmails {
@@ -135,6 +140,37 @@ func (s *SubJsonService) GetJson(subId string, host string) (string, string, err
 
 	header = fmt.Sprintf("upload=%d; download=%d; total=%d; expire=%d", traffic.Up, traffic.Down, traffic.Total, traffic.ExpiryTime/1000)
 	return string(finalJson), header, nil
+}
+
+func applyDirectRulesToJSONSubscription(subReq *SubService, subId, host string, configs []json_util.RawMessage) ([]json_util.RawMessage, error) {
+	var client model.ClientRecord
+	if err := database.GetDB().Where("sub_id = ?", subId).First(&client).Error; err != nil {
+		return nil, err
+	}
+	documents := make([]map[string]any, len(configs))
+	items := make([]happItem, 0, len(configs))
+	for index, raw := range configs {
+		if err := json.Unmarshal(raw, &documents[index]); err != nil {
+			return nil, err
+		}
+		if outbound := firstProxyOutbound(documents[index]); outbound != nil {
+			items = append(items, happItem{Outbound: outbound})
+		}
+	}
+	direct, infrastructureDomains, infrastructureIPs, err := loadHappDirectRules(client.Id, host, items, subReq.nodesByID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]json_util.RawMessage, 0, len(documents))
+	for _, document := range documents {
+		applyHappDirectRules(document, direct, infrastructureDomains, infrastructureIPs)
+		raw, err := json.MarshalIndent(document, "", "  ")
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, raw)
+	}
+	return out, nil
 }
 
 func (s *SubJsonService) getConfig(subReq *SubService, inbound *model.Inbound, client model.Client, host string) []json_util.RawMessage {

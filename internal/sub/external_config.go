@@ -16,11 +16,15 @@ import (
 // externalLinkEntry is one client × external-link row, resolved for a
 // subscription request. Email/Enable come from the owning client.
 type externalLinkEntry struct {
-	Kind   string
-	Value  string
-	Remark string
-	Email  string
-	Enable bool
+	Id           int
+	Kind         string
+	Value        string
+	Remark       string
+	Email        string
+	Enable       bool
+	Priority     int
+	SortIndex    int
+	LastGoodJSON string
 }
 
 // expandedLink is a single share link contributed by an entry, with the display
@@ -61,13 +65,20 @@ func (s *SubService) getClientExternalLinksBySubId(subId string) ([]externalLink
 
 	out := make([]externalLinkEntry, 0, len(rows))
 	for _, r := range rows {
+		if !r.Enabled {
+			continue
+		}
 		rec := byId[r.ClientId]
 		out = append(out, externalLinkEntry{
-			Kind:   r.Kind,
-			Value:  r.Value,
-			Remark: r.Remark,
-			Email:  rec.Email,
-			Enable: rec.Enable,
+			Id:           r.Id,
+			Kind:         r.Kind,
+			Value:        r.Value,
+			Remark:       r.Remark,
+			Email:        rec.Email,
+			Enable:       rec.Enable,
+			Priority:     r.Priority,
+			SortIndex:    r.SortIndex,
+			LastGoodJSON: r.LastGoodJSON,
 		})
 	}
 	return out, nil
@@ -77,6 +88,9 @@ func (s *SubService) getClientExternalLinksBySubId(subId string) ([]externalLink
 // "subscription" entry is fetched (cached) and its links are kept with their own
 // names; a "link" entry yields the single link with the row's remark.
 func expandEntry(e externalLinkEntry) []expandedLink {
+	if e.Kind == model.ExternalLinkKindJSON || e.Kind == model.ExternalLinkKindJSONSubscription {
+		return nil
+	}
 	if e.Kind == model.ExternalLinkKindSubscription {
 		links := fetchSubscriptionLinks(e.Value)
 		out := make([]expandedLink, 0, len(links))

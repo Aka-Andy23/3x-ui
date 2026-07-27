@@ -3,6 +3,7 @@ export type OnlineAPISupport = number;
 export type ProcessState = string;
 export type Protocol = string;
 export type SubLinkProvider = unknown;
+export type clientIpResetRuntime = unknown;
 export type staticEgressResolver = string;
 export type transportBits = number;
 
@@ -11,6 +12,7 @@ export interface AllSetting {
   expireDiff: number;
   externalTrafficInformEnable: boolean;
   externalTrafficInformURI: string;
+  happProviderId: string;
   ldapAutoCreate: boolean;
   ldapAutoDelete: boolean;
   ldapBaseDN: string;
@@ -58,6 +60,9 @@ export interface AllSetting {
   subEnable: boolean;
   subEnableRouting: boolean;
   subEncrypt: boolean;
+  subHappEnable: boolean;
+  subHappPath: string;
+  subHappURI: string;
   subHideSettings: boolean;
   subIncyEnableRouting: boolean;
   subIncyRoutingRules: string;
@@ -108,6 +113,7 @@ export interface AllSettingView {
   expireDiff: number;
   externalTrafficInformEnable: boolean;
   externalTrafficInformURI: string;
+  happProviderId: string;
   hasApiToken: boolean;
   hasLdapPassword: boolean;
   hasNordSecret: boolean;
@@ -162,6 +168,9 @@ export interface AllSettingView {
   subEnable: boolean;
   subEnableRouting: boolean;
   subEncrypt: boolean;
+  subHappEnable: boolean;
+  subHappPath: string;
+  subHappURI: string;
   subHideSettings: boolean;
   subIncyEnableRouting: boolean;
   subIncyRoutingRules: string;

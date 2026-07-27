@@ -4,8 +4,31 @@
 export type ClientIpInfo = {
   ip: string;
   time: string;
+  firstSeen: string;
+  lastSeen: string;
   node: string;
+  inbound: string;
 };
+
+export type IPLimitEvent = {
+  time: string;
+  action: 'ban' | 'unban' | string;
+  ip: string;
+};
+
+export function normalizeIPLimitEvents(obj: unknown): IPLimitEvent[] {
+  if (!Array.isArray(obj)) return [];
+  return obj.flatMap((value) => {
+    if (!value || typeof value !== 'object') return [];
+    const row = value as Record<string, unknown>;
+    if (typeof row.ip !== 'string' || typeof row.action !== 'string') return [];
+    return [{
+      ip: row.ip,
+      action: row.action,
+      time: typeof row.time === 'string' ? row.time : '',
+    }];
+  });
+}
 
 // normalizeClientIps accepts the API payload and returns typed entries. It also
 // tolerates the legacy shape (a plain array of "ip (time)" strings) so the UI
@@ -15,7 +38,7 @@ export function normalizeClientIps(obj: unknown): ClientIpInfo[] {
   const out: ClientIpInfo[] = [];
   for (const x of obj) {
     if (typeof x === 'string') {
-      if (x.length > 0) out.push({ ip: x, time: '', node: '' });
+      if (x.length > 0) out.push({ ip: x, time: '', firstSeen: '', lastSeen: '', node: '', inbound: '' });
       continue;
     }
     if (x && typeof x === 'object') {
@@ -25,7 +48,10 @@ export function normalizeClientIps(obj: unknown): ClientIpInfo[] {
       out.push({
         ip,
         time: typeof o.time === 'string' ? o.time : '',
+        firstSeen: typeof o.firstSeen === 'string' ? o.firstSeen : '',
+        lastSeen: typeof o.lastSeen === 'string' ? o.lastSeen : '',
         node: typeof o.node === 'string' ? o.node : '',
+        inbound: typeof o.inbound === 'string' ? o.inbound : '',
       });
     }
   }

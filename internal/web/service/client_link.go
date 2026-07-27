@@ -132,11 +132,24 @@ func (s *ClientService) SyncInbound(tx *gorm.DB, inboundId int, clients []model.
 	}
 
 	if len(toCreate) > 0 {
+		disabledEmails := make([]string, 0)
+		for _, rec := range toCreate {
+			if !rec.Enable {
+				disabledEmails = append(disabledEmails, rec.Email)
+			}
+		}
 		if err := tx.CreateInBatches(toCreate, 200).Error; err != nil {
 			return err
 		}
 		for _, rec := range toCreate {
 			idByEmail[rec.Email] = rec.Id
+		}
+		if len(disabledEmails) > 0 {
+			if err := tx.Model(&model.ClientRecord{}).
+				Where("email IN ?", disabledEmails).
+				UpdateColumn("enable", false).Error; err != nil {
+				return err
+			}
 		}
 	}
 

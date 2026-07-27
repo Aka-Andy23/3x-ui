@@ -7,6 +7,7 @@ package model
 type ClientIpEntry struct {
 	IP        string `json:"ip"`
 	Timestamp int64  `json:"timestamp"`
+	FirstSeen int64  `json:"firstSeen,omitempty"`
 }
 
 // NodeClientIp records which panel (identified by its stable panelGuid) observed

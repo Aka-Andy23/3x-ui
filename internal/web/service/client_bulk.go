@@ -1129,6 +1129,9 @@ func (s *ClientService) BulkCreate(inboundSvc *InboundService, payloads []Client
 	if len(payloads) == 0 {
 		return result, false, nil
 	}
+	if len(payloads) > MaxClientImportRows {
+		return result, false, common.NewError("client import exceeds the 1000-row limit")
+	}
 
 	skip := func(email, reason string) {
 		if strings.TrimSpace(email) == "" {

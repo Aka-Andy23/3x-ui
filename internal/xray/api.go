@@ -4,6 +4,7 @@
 package xray
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -27,6 +28,7 @@ import (
 	"github.com/xtls/xray-core/common/protocol"
 	"github.com/xtls/xray-core/common/serial"
 	"github.com/xtls/xray-core/infra/conf"
+	confserial "github.com/xtls/xray-core/infra/conf/serial"
 	hysteriaAccount "github.com/xtls/xray-core/proxy/hysteria/account"
 	"github.com/xtls/xray-core/proxy/shadowsocks"
 	"github.com/xtls/xray-core/proxy/shadowsocks_2022"
@@ -181,6 +183,11 @@ func ValidateOutboundConfig(outbound []byte) error {
 		return err
 	}
 	_, err := detour.Build()
+	return err
+}
+
+func ValidateClientConfig(config []byte) error {
+	_, err := confserial.LoadJSONConfig(bytes.NewReader(config))
 	return err
 }
 

@@ -540,6 +540,14 @@ export const sections: readonly Section[] = [
           { name: 'ips', in: 'body (json)', type: 'object[]', desc: 'Array of InboundClientIps to merge.' },
         ],
       },
+      {
+        method: 'POST',
+        path: '/panel/api/server/clientIps/clear/:email',
+        summary: 'Clear the active-IP state for one client on this node. The central panel uses this internal endpoint while coordinating a cluster-wide reset.',
+        params: [
+          { name: 'email', in: 'path', type: 'string', desc: 'Exact client email.' },
+        ],
+      },
     ],
   },
 
@@ -638,13 +646,61 @@ export const sections: readonly Section[] = [
       {
         method: 'POST',
         path: '/panel/api/clients/:email/externalLinks',
-        summary: 'Replace a client\'s external links (per-client share links and remote subscription URLs surfaced in their subscription). Sends the full set; the server replaces all rows.',
+        summary: 'Replace a client\'s external links and JSON sources. Manual JSON is validated immediately. Remote JSON subscriptions require HTTPS and retain last-known-good content when refresh fails.',
         params: [
           { name: 'email', in: 'path', type: 'string', desc: 'Client email (unique identifier).' },
-          { name: 'externalLinks', in: 'body (json)', type: 'object[]', desc: 'Rows of { kind: "link" | "subscription", value, remark }. kind=link must be a share link; kind=subscription must be an http(s) URL.' },
+          { name: 'externalLinks', in: 'body (json)', type: 'object[]', desc: 'Rows with kind link, subscription, json, or json_subscription plus source controls.' },
         ],
-        body: '{\n  "externalLinks": [\n    { "kind": "link", "value": "vless://uuid@host:443?...#srv", "remark": "DE" },\n    { "kind": "subscription", "value": "https://provider.example/sub/abc", "remark": "Provider" }\n  ]\n}',
+        body: '{\n  "externalLinks": [\n    { "kind": "json", "value": "{\\"outbounds\\":[...]}", "remark": "Manual", "enabled": true },\n    { "kind": "json_subscription", "value": "https://provider.example/config.json", "remark": "Provider", "updateIntervalMinutes": 60, "timeoutSeconds": 8, "maxResponseBytes": 2097152, "maxRedirects": 3 }\n  ]\n}',
         response: '{\n  "success": true\n}',
+      },
+      {
+        method: 'GET',
+        path: '/panel/api/clients/:email/subscriptionProfile',
+        summary: 'Read the per-client Happ subscription profile, status, validation timestamps, and lowest-delay selection settings.',
+        params: [
+          { name: 'email', in: 'path', type: 'string', desc: 'Client email.' },
+        ],
+      },
+      {
+        method: 'POST',
+        path: '/panel/api/clients/:email/subscriptionProfile',
+        summary: 'Create or update the per-client Happ profile. Enabling automatic lowest-delay selection requires a valid eight-character Happ Provider ID.',
+        params: [
+          { name: 'email', in: 'path', type: 'string', desc: 'Client email.' },
+        ],
+      },
+      {
+        method: 'GET',
+        path: '/panel/api/clients/:email/happPreview',
+        summary: 'Generate, allowlist, merge, and Xray-validate the current Happ JSON document, returning it in the authenticated API envelope.',
+        params: [
+          { name: 'email', in: 'path', type: 'string', desc: 'Client email.' },
+        ],
+      },
+      {
+        method: 'POST',
+        path: '/panel/api/clients/:email/happRegenerate',
+        summary: 'Refresh enabled remote JSON sources, retain last-known-good data on partial failure, then regenerate and validate the Happ JSON document.',
+        params: [
+          { name: 'email', in: 'path', type: 'string', desc: 'Client email.' },
+        ],
+      },
+      {
+        method: 'GET',
+        path: '/panel/api/clients/:email/ipLimitEvents',
+        summary: 'Return the most recent parsed IP-limit ban and unban events for one exact client email without exposing unrelated log lines.',
+        params: [
+          { name: 'email', in: 'path', type: 'string', desc: 'Client email.' },
+        ],
+      },
+      {
+        method: 'POST',
+        path: '/panel/api/clients/externalSources/:id/refresh',
+        summary: 'Refresh one HTTPS JSON source with SSRF, redirect, timeout, content-type, and response-size controls.',
+        params: [
+          { name: 'id', in: 'path', type: 'number', desc: 'External source ID.' },
+        ],
       },
       {
         method: 'POST',
@@ -891,6 +947,48 @@ export const sections: readonly Section[] = [
         ],
         response:
           '{\n  "success": true,\n  "obj": [\n    "vless://uuid@host:443?...#user1"\n  ]\n}',
+      },
+    ],
+  },
+
+  {
+    id: 'direct-domains',
+    title: 'Direct domains',
+    description:
+      'Manage normalized global direct-routing domains and per-client additions or exclusions. Full URLs, Unicode IDNs, whitespace, commas, and line breaks are accepted by bulk import.',
+    endpoints: [
+      {
+        method: 'GET',
+        path: '/panel/api/directDomains/list',
+        summary: 'List global domains or a client scope, optionally including global rows.',
+        params: [
+          { name: 'clientEmail', in: 'query', type: 'string', optional: true, desc: 'Omit for the global scope.' },
+          { name: 'includeGlobal', in: 'query', type: 'integer', optional: true, desc: 'Use 1 to include global rows with a client scope.' },
+        ],
+      },
+      {
+        method: 'POST',
+        path: '/panel/api/directDomains/upsert',
+        summary: 'Normalize and create or update one direct domain or client exclusion.',
+      },
+      {
+        method: 'POST',
+        path: '/panel/api/directDomains/import',
+        summary: 'Normalize, deduplicate, and transactionally import a mixed multiline domain list.',
+      },
+      {
+        method: 'POST',
+        path: '/panel/api/directDomains/replace',
+        summary: 'Transactionally replace all per-client additions and global-list exclusions for one client.',
+      },
+      {
+        method: 'POST',
+        path: '/panel/api/directDomains/del/:id',
+        summary: 'Delete a direct-domain row only from the requested global or client scope.',
+        params: [
+          { name: 'id', in: 'path', type: 'number', desc: 'Direct-domain row ID.' },
+          { name: 'clientEmail', in: 'query', type: 'string', optional: true, desc: 'Required for a client-scoped row.' },
+        ],
       },
     ],
   },

@@ -992,13 +992,6 @@ func (s *ServerService) UpdateXray(version string) error {
 	if !slices.Contains(versions, version) {
 		return fmt.Errorf("xray version %q is not in the fetched release list", version)
 	}
-
-	// 1. Stop xray before doing anything
-	if err := s.StopXrayService(); err != nil {
-		logger.Warning("failed to stop xray before update:", err)
-	}
-
-	// 2. Download the zip
 	zipFileName, err := s.downloadXRay(version)
 	if err != nil {
 		return err
@@ -1019,69 +1012,183 @@ func (s *ServerService) UpdateXray(version string) error {
 	if err != nil {
 		return err
 	}
-
-	// 3. Helper to extract files
-	copyZipFile := func(zipName string, fileName string) error {
-		zipFile, err := reader.Open(zipName)
-		if err != nil {
-			return err
-		}
-		defer zipFile.Close()
-		if err := os.MkdirAll(filepath.Dir(fileName), 0o755); err != nil {
-			return err
-		}
-		tmpFile, err := os.CreateTemp(filepath.Dir(fileName), ".xray-*")
-		if err != nil {
-			return err
-		}
-		tmpPath := tmpFile.Name()
-		ok := false
-		defer func() {
-			_ = tmpFile.Close()
-			if !ok {
-				_ = os.Remove(tmpPath)
-			}
-		}()
-		n, err := io.Copy(tmpFile, io.LimitReader(zipFile, maxXrayBinaryBytes+1))
-		if err != nil {
-			return err
-		}
-		if n > maxXrayBinaryBytes {
-			return fmt.Errorf("xray binary exceeds %d bytes", maxXrayBinaryBytes)
-		}
-		if err := tmpFile.Chmod(0o755); err != nil {
-			return err
-		}
-		if err := tmpFile.Close(); err != nil {
-			return err
-		}
-		if runtime.GOOS == "windows" {
-			_ = os.Remove(fileName)
-		}
-		if err := os.Rename(tmpPath, fileName); err != nil {
-			return err
-		}
-		ok = true
-		return nil
-	}
-
-	// 4. Extract correct binary
+	targetBinary := xray.GetBinaryPath()
+	zipEntry := "xray"
 	if runtime.GOOS == "windows" {
-		targetBinary := filepath.Join(config.GetBinFolderPath(), "xray-windows-amd64.exe")
-		err = copyZipFile("xray.exe", targetBinary)
-	} else {
-		err = copyZipFile("xray", xray.GetBinaryPath())
+		targetBinary = filepath.Join(config.GetBinFolderPath(), "xray-windows-amd64.exe")
+		zipEntry = "xray.exe"
 	}
+	candidate, err := extractXrayCandidate(reader, zipEntry, filepath.Dir(targetBinary))
 	if err != nil {
 		return err
 	}
-
-	// 5. Restart xray
-	if err := s.xrayService.RestartXray(true); err != nil {
-		logger.Error("start xray failed:", err)
+	defer os.Remove(candidate)
+	versionOutput, err := exec.CommandContext(context.Background(), candidate, "-version").CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("validate downloaded xray binary: %w", err)
+	}
+	if !strings.Contains(string(versionOutput), strings.TrimPrefix(version, "v")) {
+		return fmt.Errorf("downloaded xray binary version does not match %s", version)
+	}
+	configPath := xray.GetConfigPath()
+	if _, err := os.Stat(configPath); err == nil {
+		if err := xray.ValidateConfigFile(candidate, configPath); err != nil {
+			return fmt.Errorf("downloaded xray rejected the current configuration: %w", err)
+		}
+	} else if !os.IsNotExist(err) {
 		return err
 	}
+	binaryBackup := targetBinary + ".previous"
+	configBackup := configPath + ".previous"
+	hadBinary := false
+	hadConfig := false
+	if _, err := os.Stat(targetBinary); err == nil {
+		hadBinary = true
+		if err := copyFileAtomic(targetBinary, binaryBackup, 0o755, maxXrayBinaryBytes); err != nil {
+			return fmt.Errorf("backup current xray binary: %w", err)
+		}
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	if _, err := os.Stat(configPath); err == nil {
+		hadConfig = true
+		if err := copyFileAtomic(configPath, configBackup, 0o600, maxXrayBinaryBytes); err != nil {
+			return fmt.Errorf("backup current xray config: %w", err)
+		}
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	if err := s.StopXrayService(); err != nil {
+		logger.Warning("failed to stop xray before update:", err)
+	}
+	if runtime.GOOS == "windows" {
+		_ = os.Remove(targetBinary)
+	}
+	if err := os.Rename(candidate, targetBinary); err != nil {
+		if hadBinary && runtime.GOOS == "windows" {
+			_ = copyFileAtomic(binaryBackup, targetBinary, 0o755, maxXrayBinaryBytes)
+		}
+		if hadBinary {
+			_ = s.xrayService.RestartXray(true)
+		}
+		return err
+	}
+	restore := func() error {
+		var restoreErrors []error
+		if hadBinary {
+			restoreErrors = append(restoreErrors, copyFileAtomic(binaryBackup, targetBinary, 0o755, maxXrayBinaryBytes))
+		} else {
+			restoreErrors = append(restoreErrors, os.Remove(targetBinary))
+		}
+		if hadConfig {
+			restoreErrors = append(restoreErrors, copyFileAtomic(configBackup, configPath, 0o600, maxXrayBinaryBytes))
+		}
+		return errors.Join(restoreErrors...)
+	}
+	if err := s.xrayService.RestartXray(true); err != nil {
+		restartErr := err
+		if rollbackErr := restore(); rollbackErr != nil {
+			return errors.Join(fmt.Errorf("start updated xray: %w", restartErr), fmt.Errorf("rollback xray: %w", rollbackErr))
+		}
+		if hadBinary {
+			if rollbackRestartErr := s.xrayService.RestartXray(true); rollbackRestartErr != nil {
+				return errors.Join(fmt.Errorf("start updated xray: %w", restartErr), fmt.Errorf("restart rolled-back xray: %w", rollbackRestartErr))
+			}
+		}
+		return fmt.Errorf("updated xray failed validation/start and was rolled back: %w", restartErr)
+	}
+	return nil
+}
 
+func extractXrayCandidate(reader *zip.Reader, zipEntry, directory string) (string, error) {
+	entry, err := reader.Open(zipEntry)
+	if err != nil {
+		return "", err
+	}
+	defer entry.Close()
+	if err := os.MkdirAll(directory, 0o755); err != nil {
+		return "", err
+	}
+	pattern := ".xray-candidate-*"
+	if runtime.GOOS == "windows" {
+		pattern += ".exe"
+	}
+	file, err := os.CreateTemp(directory, pattern)
+	if err != nil {
+		return "", err
+	}
+	path := file.Name()
+	ok := false
+	defer func() {
+		_ = file.Close()
+		if !ok {
+			_ = os.Remove(path)
+		}
+	}()
+	n, err := io.Copy(file, io.LimitReader(entry, maxXrayBinaryBytes+1))
+	if err != nil {
+		return "", err
+	}
+	if n > maxXrayBinaryBytes {
+		return "", fmt.Errorf("xray binary exceeds %d bytes", maxXrayBinaryBytes)
+	}
+	if err := file.Chmod(0o755); err != nil {
+		return "", err
+	}
+	if err := file.Sync(); err != nil {
+		return "", err
+	}
+	if err := file.Close(); err != nil {
+		return "", err
+	}
+	ok = true
+	return path, nil
+}
+
+func copyFileAtomic(source, destination string, mode os.FileMode, maxBytes int64) error {
+	input, err := os.Open(source)
+	if err != nil {
+		return err
+	}
+	defer input.Close()
+	if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
+		return err
+	}
+	output, err := os.CreateTemp(filepath.Dir(destination), ".xray-copy-*")
+	if err != nil {
+		return err
+	}
+	path := output.Name()
+	ok := false
+	defer func() {
+		_ = output.Close()
+		if !ok {
+			_ = os.Remove(path)
+		}
+	}()
+	n, err := io.Copy(output, io.LimitReader(input, maxBytes+1))
+	if err != nil {
+		return err
+	}
+	if n > maxBytes {
+		return fmt.Errorf("file exceeds %d bytes", maxBytes)
+	}
+	if err := output.Chmod(mode); err != nil {
+		return err
+	}
+	if err := output.Sync(); err != nil {
+		return err
+	}
+	if err := output.Close(); err != nil {
+		return err
+	}
+	if runtime.GOOS == "windows" {
+		_ = os.Remove(destination)
+	}
+	if err := os.Rename(path, destination); err != nil {
+		return err
+	}
+	ok = true
 	return nil
 }
 

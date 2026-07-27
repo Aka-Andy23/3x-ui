@@ -9,6 +9,8 @@ export const DefaultsPayloadSchema = z.object({
   subURI: z.string().optional(),
   subJsonURI: z.string().optional(),
   subJsonEnable: z.boolean().optional(),
+  subHappURI: z.string().optional(),
+  subHappEnable: z.boolean().optional(),
   subClashURI: z.string().optional(),
   subClashEnable: z.boolean().optional(),
   pageSize: z.number().optional(),

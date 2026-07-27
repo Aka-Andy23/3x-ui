@@ -63,6 +63,28 @@ func TestWriteFileAtomicModeAndRenameFailure(t *testing.T) {
 	}
 }
 
+func TestValidateConfigBytesUsesBinaryTestMode(t *testing.T) {
+	dir := t.TempDir()
+	binary := filepath.Join(dir, "xray")
+	script := "#!/bin/sh\nconfig=\"$4\"\nif grep -q invalid \"$config\"; then echo rejected >&2; exit 1; fi\nexit 0\n"
+	if err := os.WriteFile(binary, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateConfigBytes(binary, dir, []byte(`{"outbounds":[]}`)); err != nil {
+		t.Fatalf("valid config rejected: %v", err)
+	}
+	if err := ValidateConfigBytes(binary, dir, []byte(`{"invalid":true}`)); err == nil {
+		t.Fatal("invalid config accepted")
+	}
+	matches, err := filepath.Glob(filepath.Join(dir, ".config-validate-*.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 0 {
+		t.Fatalf("validation temp files leaked: %v", matches)
+	}
+}
+
 func TestStopWaitsForGracefulExit(t *testing.T) {
 	initProcessTestLogger(t)
 

@@ -74,12 +74,22 @@ func (s *Server) initRouter() (*gin.Engine, error) {
 		return nil, err
 	}
 
+	HappPath, err := s.settingService.GetSubHappPath()
+	if err != nil {
+		return nil, err
+	}
+
 	ClashPath, err := s.settingService.GetSubClashPath()
 	if err != nil {
 		return nil, err
 	}
 
 	subJsonEnable, err := s.settingService.GetSubJsonEnable()
+	if err != nil {
+		return nil, err
+	}
+
+	subHappEnable, err := s.settingService.GetSubHappEnable()
 	if err != nil {
 		return nil, err
 	}
@@ -240,7 +250,7 @@ func (s *Server) initRouter() (*gin.Engine, error) {
 	g := engine.Group("/")
 
 	s.sub = NewSUBController(
-		g, LinksPath, JsonPath, ClashPath, subJsonEnable, subClashEnable, Encrypt, RemarkTemplate, SubUpdates,
+		g, LinksPath, JsonPath, HappPath, ClashPath, subJsonEnable, subHappEnable, subClashEnable, Encrypt, RemarkTemplate, SubUpdates,
 		SubJsonMux, SubJsonRules, SubJsonFinalMask, SubClashEnableRouting, SubClashRules, SubTitle, SubSupportUrl,
 		SubProfileUrl, SubAnnounce, SubEnableRouting, SubRoutingRules, SubHideSettings,
 		SubIncyEnableRouting, SubIncyRoutingRules)

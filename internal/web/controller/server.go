@@ -81,6 +81,7 @@ func (a *ServerController) initRouter(g *gin.RouterGroup) {
 	g.POST("/scanRealityTarget", a.scanRealityTarget)
 	g.POST("/scanRealityTargets", a.scanRealityTargets)
 	g.POST("/clientIps", a.setClientIps)
+	g.POST("/clientIps/clear/:email", a.clearClientIps)
 }
 
 // startTask registers the @2s ticker that refreshes server status, samples
@@ -526,4 +527,9 @@ func (a *ServerController) setClientIps(c *gin.Context) {
 	}
 	err := (&service.InboundService{}).MergeInboundClientIps(ips)
 	jsonMsg(c, "Client IPs merged", err)
+}
+
+func (a *ServerController) clearClientIps(c *gin.Context) {
+	err := (&service.InboundService{}).ClearClientIps(c.Param("email"))
+	jsonMsg(c, I18nWeb(c, "pages.inbounds.toasts.logCleanSuccess"), err)
 }

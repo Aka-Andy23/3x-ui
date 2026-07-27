@@ -97,6 +97,8 @@ func TestAPIRoutesDocumented(t *testing.T) {
 			basePath = "/panel/api/nodes"
 		case "host.go":
 			basePath = "/panel/api/hosts"
+		case "direct_domain.go":
+			basePath = "/panel/api/directDomains"
 		case "setting.go":
 			basePath = "/panel/api/setting"
 		case "xray_setting.go":

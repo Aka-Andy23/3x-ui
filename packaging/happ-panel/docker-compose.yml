@@ -1,0 +1,64 @@
+name: xray-panel
+
+services:
+  panel:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: xray-panel-3x-ui:3.5.0-happ
+    container_name: xray-panel
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      XUI_PORT: ${XUI_PORT:-2053}
+      XUI_DB_TYPE: ${XUI_DB_TYPE:-sqlite}
+      XUI_DB_DSN: ${XUI_DB_DSN:-}
+      XUI_ENABLE_FAIL2BAN: ${XUI_ENABLE_FAIL2BAN:-true}
+      XUI_LOG_LEVEL: ${XUI_LOG_LEVEL:-info}
+      XUI_GOGC: ${XUI_GOGC:-75}
+      XUI_MEMORY_RELEASE_INTERVAL: ${XUI_MEMORY_RELEASE_INTERVAL:-10}
+      XUI_MEMORY_LIMIT: ${XUI_MEMORY_LIMIT:-400}
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+      - NET_BIND_SERVICE
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "${PANEL_BIND:-0.0.0.0}:${PANEL_PORT:-2053}:${XUI_PORT:-2053}/tcp"
+    volumes:
+      - xui-data:/etc/x-ui
+      - xui-certs:/root/cert
+      - xui-acme:/root/.acme.sh
+      - xui-logs:/var/log/x-ui
+    healthcheck:
+      test: ["CMD-SHELL", "test -x /app/x-ui && /app/x-ui version >/dev/null"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+  postgres:
+    image: postgres:16-alpine
+    profiles: ["postgres"]
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-xui}
+      POSTGRES_DB: ${POSTGRES_DB:-xui}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-xui} -d ${POSTGRES_DB:-xui}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  xui-data:
+  xui-certs:
+  xui-acme:
+  xui-logs:
+  postgres-data:

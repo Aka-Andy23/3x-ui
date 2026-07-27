@@ -13,6 +13,7 @@ import (
 	"github.com/mhsanaei/3x-ui/v3/internal/database"
 	"github.com/mhsanaei/3x-ui/v3/internal/database/model"
 	"github.com/mhsanaei/3x-ui/v3/internal/util/common"
+	"github.com/mhsanaei/3x-ui/v3/internal/util/domainset"
 	"github.com/mhsanaei/3x-ui/v3/internal/util/random"
 	"github.com/mhsanaei/3x-ui/v3/internal/xray"
 
@@ -59,11 +60,40 @@ func (s *ClientService) Create(inboundSvc *InboundService, payload *ClientCreate
 	if len(payload.InboundIds) == 0 {
 		return false, common.NewError("at least one inbound is required")
 	}
+	if payload.ExternalLinks != nil {
+		if _, err := normalizeExternalLinks(payload.ExternalLinks); err != nil {
+			return false, err
+		}
+	}
+	if payload.SubscriptionProfile != nil {
+		if err := validateSubscriptionProfile(*payload.SubscriptionProfile); err != nil {
+			return false, err
+		}
+		if payload.SubscriptionProfile.AutoSelectEnabled {
+			providerID, err := (&SettingService{}).GetHappProviderID()
+			if err != nil {
+				return false, err
+			}
+			if !validHappProviderID(providerID) {
+				return false, common.NewError("a valid Happ Provider ID is required for automatic lowest-delay selection")
+			}
+		}
+	}
+	for _, direct := range payload.DirectDomains {
+		if direct.Mode != model.DirectDomainModeInclude && direct.Mode != model.DirectDomainModeExclude {
+			return false, common.NewError("direct domain mode is invalid")
+		}
+		if _, err := domainset.Normalize(direct.Value); err != nil {
+			return false, err
+		}
+	}
 
 	if client.SubID == "" {
 		client.SubID = uuid.NewString()
 	}
-	if !client.Enable {
+	if payload.ClientEnable != nil {
+		client.Enable = *payload.ClientEnable
+	} else if !client.Enable {
 		client.Enable = true
 	}
 	now := time.Now().UnixMilli()
@@ -78,6 +108,7 @@ func (s *ClientService) Create(inboundSvc *InboundService, payload *ClientCreate
 		return false, err
 	}
 	emailTaken := !errors.Is(err, gorm.ErrRecordNotFound)
+	existingInboundIds := map[int]struct{}{}
 	if emailTaken {
 		if existing.SubID == "" || existing.SubID != client.SubID {
 			return false, common.NewError("email already in use:", client.Email)
@@ -96,6 +127,13 @@ func (s *ClientService) Create(inboundSvc *InboundService, payload *ClientCreate
 		if client.Secret == "" {
 			client.Secret = existing.Secret
 		}
+		ids, idsErr := s.GetInboundIdsForRecord(existing.Id)
+		if idsErr != nil {
+			return false, idsErr
+		}
+		for _, id := range ids {
+			existingInboundIds[id] = struct{}{}
+		}
 	}
 
 	if client.SubID != "" {
@@ -110,17 +148,34 @@ func (s *ClientService) Create(inboundSvc *InboundService, payload *ClientCreate
 		}
 	}
 
-	needRestart := false
+	inbounds := make([]*model.Inbound, 0, len(payload.InboundIds))
 	for _, ibId := range payload.InboundIds {
 		inbound, getErr := inboundSvc.GetInbound(ibId)
 		if getErr != nil {
-			return needRestart, getErr
+			return false, getErr
 		}
 		if err := s.fillProtocolDefaults(&client, inbound); err != nil {
-			return needRestart, err
+			return false, err
 		}
+		inbounds = append(inbounds, inbound)
+	}
+
+	needRestart := false
+	attached := make([]int, 0, len(inbounds))
+	rollback := func() {
+		if emailTaken {
+			if len(attached) > 0 {
+				_, _ = s.DetachByEmailMany(inboundSvc, client.Email, attached)
+			}
+			return
+		}
+		_, _ = s.DeleteByEmail(inboundSvc, client.Email, false)
+	}
+	for _, inbound := range inbounds {
+		ibId := inbound.Id
 		settingsPayload, mErr := json.Marshal(map[string][]model.Client{"clients": {clientWithInboundFlow(client, inbound)}})
 		if mErr != nil {
+			rollback()
 			return needRestart, mErr
 		}
 		nr, addErr := s.AddInboundClient(inboundSvc, &model.Inbound{
@@ -128,10 +183,37 @@ func (s *ClientService) Create(inboundSvc *InboundService, payload *ClientCreate
 			Settings: string(settingsPayload),
 		})
 		if addErr != nil {
+			rollback()
 			return needRestart, addErr
+		}
+		if _, alreadyAttached := existingInboundIds[ibId]; !alreadyAttached {
+			attached = append(attached, ibId)
 		}
 		if nr {
 			needRestart = true
+		}
+	}
+	rec, err := s.GetRecordByEmail(nil, client.Email)
+	if err != nil {
+		rollback()
+		return needRestart, err
+	}
+	if payload.ExternalLinks != nil {
+		if err := s.SetExternalLinksForRecord(rec.Id, payload.ExternalLinks); err != nil {
+			rollback()
+			return needRestart, err
+		}
+	}
+	if payload.SubscriptionProfile != nil {
+		if _, err := s.SaveSubscriptionProfileForRecord(rec.Id, *payload.SubscriptionProfile); err != nil {
+			rollback()
+			return needRestart, err
+		}
+	}
+	for _, direct := range payload.DirectDomains {
+		if _, err := s.UpsertDirectDomain(rec.Id, direct); err != nil {
+			rollback()
+			return needRestart, err
 		}
 	}
 	return needRestart, nil
@@ -431,6 +513,22 @@ func (s *ClientService) Update(inboundSvc *InboundService, id int, updated model
 			Update("email", updated.Email).Error; err != nil {
 			return needRestart, err
 		}
+		if err := database.GetDB().Transaction(func(tx *gorm.DB) error {
+			if err := tx.Where("client_email = ?", updated.Email).Delete(&model.InboundClientIps{}).Error; err != nil {
+				return err
+			}
+			if err := tx.Model(&model.InboundClientIps{}).Where("client_email = ?", existing.Email).
+				Update("client_email", updated.Email).Error; err != nil {
+				return err
+			}
+			if err := tx.Where("email = ?", updated.Email).Delete(&model.NodeClientIp{}).Error; err != nil {
+				return err
+			}
+			return tx.Model(&model.NodeClientIp{}).Where("email = ?", existing.Email).
+				Update("email", updated.Email).Error
+		}); err != nil {
+			return needRestart, err
+		}
 	}
 
 	reverseStr := ""
@@ -543,14 +641,25 @@ func (s *ClientService) Delete(inboundSvc *InboundService, id int, keepTraffic b
 		if err := tx.Where("client_id = ?", id).Delete(&model.ClientExternalLink{}).Error; err != nil {
 			return err
 		}
+		if err := tx.Where("client_id = ?", id).Delete(&model.ClientSubscriptionProfile{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("client_id = ?", id).Delete(&model.DirectDomain{}).Error; err != nil {
+			return err
+		}
+		if existing.Email != "" {
+			if err := tx.Where("client_email = ?", existing.Email).Delete(&model.InboundClientIps{}).Error; err != nil {
+				return err
+			}
+			if err := tx.Where("email = ?", existing.Email).Delete(&model.NodeClientIp{}).Error; err != nil {
+				return err
+			}
+		}
 		if !keepTraffic && existing.Email != "" {
 			if err := tx.Where("email = ?", existing.Email).Delete(&xray.ClientTraffic{}).Error; err != nil {
 				return err
 			}
 			if err := clearGlobalTraffic(tx, existing.Email); err != nil {
-				return err
-			}
-			if err := tx.Where("client_email = ?", existing.Email).Delete(&model.InboundClientIps{}).Error; err != nil {
 				return err
 			}
 			if err := tx.Where("email = ?", existing.Email).Delete(&model.NodeClientTraffic{}).Error; err != nil {

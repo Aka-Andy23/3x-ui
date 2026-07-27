@@ -29,6 +29,7 @@ export class AllSetting {
   xrayTemplateConfig = '';
   subEnable = true;
   subJsonEnable = false;
+  subHappEnable = true;
   subTitle = '';
   subSupportUrl = '';
   subProfileUrl = '';
@@ -41,6 +42,7 @@ export class AllSetting {
   subPort = 2096;
   subPath = '/sub/';
   subJsonPath = '/json/';
+  subHappPath = '/happ/';
   subClashEnable = false;
   subClashPath = '/clash/';
   subDomain = '';
@@ -53,6 +55,8 @@ export class AllSetting {
   subEncrypt = true;
   subURI = '';
   subJsonURI = '';
+  subHappURI = '';
+  happProviderId = '';
   subClashURI = '';
   subClashEnableRouting = false;
   subClashRules = '';

@@ -56,8 +56,10 @@ type SUBController struct {
 
 	subPath        string
 	subJsonPath    string
+	subHappPath    string
 	subClashPath   string
 	jsonEnabled    bool
+	happEnabled    bool
 	clashEnabled   bool
 	subEncrypt     bool
 	updateInterval string
@@ -69,6 +71,7 @@ type SUBController struct {
 
 	subTemplateMu    sync.RWMutex
 	subTemplateCache map[string]*cachedSubTemplate
+	happLimiter      *requestLimiter
 }
 
 // NewSUBController creates a new subscription controller with the given configuration.
@@ -76,8 +79,10 @@ func NewSUBController(
 	g *gin.RouterGroup,
 	subPath string,
 	jsonPath string,
+	happPath string,
 	clashPath string,
 	jsonEnabled bool,
+	happEnabled bool,
 	clashEnabled bool,
 	encrypt bool,
 	remarkTemplate string,
@@ -112,8 +117,10 @@ func NewSUBController(
 
 		subPath:        subPath,
 		subJsonPath:    jsonPath,
+		subHappPath:    happPath,
 		subClashPath:   clashPath,
 		jsonEnabled:    jsonEnabled,
+		happEnabled:    happEnabled,
 		clashEnabled:   clashEnabled,
 		subEncrypt:     encrypt,
 		updateInterval: update,
@@ -123,6 +130,7 @@ func NewSUBController(
 		subClashService: NewSubClashService(clashEnableRouting, clashRules, sub),
 
 		subTemplateCache: map[string]*cachedSubTemplate{},
+		happLimiter:      newRequestLimiter(120, time.Minute),
 	}
 	a.initRouter(g)
 	return a
@@ -138,6 +146,11 @@ func (a *SUBController) initRouter(g *gin.RouterGroup) {
 		gJson := g.Group(a.subJsonPath)
 		gJson.GET(":subid", a.subJsons)
 		gJson.HEAD(":subid", a.subJsons)
+	}
+	if a.happEnabled {
+		gHapp := g.Group(a.subHappPath)
+		gHapp.GET(":subid", a.subHappJsons)
+		gHapp.HEAD(":subid", a.subHappJsons)
 	}
 	if a.clashEnabled {
 		gClash := g.Group(a.subClashPath)
@@ -401,6 +414,59 @@ func (a *SUBController) subJsons(c *gin.Context) {
 
 		c.String(200, jsonSub)
 	}
+}
+
+func (a *SUBController) subHappJsons(c *gin.Context) {
+	if retry, allowed := a.happLimiter.allow(c.ClientIP()); !allowed {
+		c.Header("Retry-After", strconv.Itoa(max(1, int(retry.Seconds()))))
+		c.Status(http.StatusTooManyRequests)
+		return
+	}
+	subId := c.Param("subid")
+	scheme, host, hostWithPort, _ := a.subService.ResolveRequest(c)
+	generated, err := a.subJsonService.GetHappJSON(subId, host, false)
+	if err != nil || generated == nil || generated.JSON == "" {
+		writeSubError(c, err)
+		return
+	}
+	profileUrl := a.subProfileUrl
+	if profileUrl == "" {
+		profileUrl = fmt.Sprintf("%s://%s%s", scheme, hostWithPort, c.Request.URL.RequestURI())
+	}
+	a.ApplyCommonHeaders(c, generated.UserInfo, a.updateInterval, generated.Title, a.subSupportUrl, profileUrl, a.subAnnounce, a.subEnableRouting, a.subRoutingRules, a.subHideSettings)
+	if validHappProviderIDValue(generated.ProviderID) {
+		c.Header("providerid", generated.ProviderID)
+	}
+	if generated.AutoSelect {
+		c.Header("subscription-autoconnect", "1")
+		c.Header("subscription-autoconnect-type", "lowestdelay")
+		c.Header("subscription-ping-onopen-enabled", "1")
+	}
+	c.Header("ETag", generated.ETag)
+	c.Header("Cache-Control", "private, max-age=0, must-revalidate")
+	c.Header("Vary", "Accept-Encoding")
+	if generated.LastModifiedAt > 0 {
+		c.Header("Last-Modified", time.UnixMilli(generated.LastModifiedAt).UTC().Format(http.TimeFormat))
+	}
+	status := "valid"
+	if generated.Partial {
+		status = "partial"
+		c.Header("X-Subscription-Warnings", strconv.Itoa(len(generated.Warnings)))
+	}
+	c.Header("X-Subscription-Status", status)
+	if c.GetHeader("If-None-Match") == generated.ETag {
+		c.Status(http.StatusNotModified)
+		return
+	}
+	if generated.Title != "" {
+		c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename*=UTF-8''%s.json`, url.PathEscape(generated.Title)))
+	}
+	if c.Request.Method == http.MethodHead {
+		c.Header("Content-Length", strconv.Itoa(len(generated.JSON)))
+		c.Status(http.StatusOK)
+		return
+	}
+	c.Data(http.StatusOK, "application/json; charset=utf-8", []byte(generated.JSON))
 }
 
 func (a *SUBController) subClashs(c *gin.Context) {

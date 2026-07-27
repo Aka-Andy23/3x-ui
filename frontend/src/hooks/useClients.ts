@@ -35,7 +35,19 @@ import { DefaultsPayloadSchema } from '@/schemas/defaults';
 import { TRAFFIC_POLL_INTERVAL_S } from '@/lib/traffic/poll-interval';
 
 // One row sent to POST /clients/:email/externalLinks.
-export type ExternalLinkInput = { kind: 'link' | 'subscription'; value: string; remark: string };
+export type ExternalLinkInput = {
+  id?: number;
+  kind: 'link' | 'subscription' | 'json' | 'json_subscription';
+  value: string;
+  remark: string;
+  comment?: string;
+  enabled?: boolean;
+  priority?: number;
+  updateIntervalMinutes?: number;
+  timeoutSeconds?: number;
+  maxResponseBytes?: number;
+  maxRedirects?: number;
+};
 
 export type { ClientRecord, ClientTraffic, ClientsSummary, InboundOption, ExternalLink };
 
@@ -46,6 +58,8 @@ interface SubSettings {
   subURI: string;
   subJsonURI: string;
   subJsonEnable: boolean;
+  subHappURI: string;
+  subHappEnable: boolean;
   subClashURI: string;
   subClashEnable: boolean;
   publicHost: string;
@@ -245,6 +259,8 @@ export function useClients() {
     subURI: (defaults.subURI as string) || '',
     subJsonURI: (defaults.subJsonURI as string) || '',
     subJsonEnable: !!defaults.subJsonEnable,
+    subHappURI: (defaults.subHappURI as string) || '',
+    subHappEnable: !!defaults.subHappEnable,
     subClashURI: (defaults.subClashURI as string) || '',
     subClashEnable: !!defaults.subClashEnable,
     publicHost: (defaults.subDomain as string) || (defaults.webDomain as string) || '',
@@ -253,6 +269,8 @@ export function useClients() {
     defaults.subURI,
     defaults.subJsonURI,
     defaults.subJsonEnable,
+    defaults.subHappURI,
+    defaults.subHappEnable,
     defaults.subClashURI,
     defaults.subClashEnable,
     defaults.subDomain,

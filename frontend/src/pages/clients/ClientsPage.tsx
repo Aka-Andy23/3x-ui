@@ -63,13 +63,14 @@ import type { ClientRecord, InboundOption, ExternalLink, ExternalLinkInput } fro
 import ClientTrafficCell from '@/components/clients/ClientTrafficCell';
 import ClientSpeedTag, { isActiveSpeed } from '@/components/clients/ClientSpeedTag';
 import AppSidebar from '@/layouts/AppSidebar';
-import { IntlUtil, SizeFormatter } from '@/utils';
+import { HttpUtil, IntlUtil, SizeFormatter } from '@/utils';
 import { setMessageInstance } from '@/utils/messageBus';
 import { LazyMount } from '@/components/utility';
 const ClientFormModal = lazy(() => import('./ClientFormModal'));
 const ClientInfoModal = lazy(() => import('./ClientInfoModal'));
 const ClientQrModal = lazy(() => import('./ClientQrModal'));
 const ClientBulkAddModal = lazy(() => import('./ClientBulkAddModal'));
+const ClientImportModal = lazy(() => import('./ClientImportModal'));
 const ClientBulkAdjustModal = lazy(() => import('./ClientBulkAdjustModal'));
 const FilterDrawer = lazy(() => import('./FilterDrawer'));
 const SubLinksModal = lazy(() => import('./SubLinksModal'));
@@ -77,7 +78,6 @@ const BulkAddToGroupModal = lazy(() => import('./BulkAddToGroupModal'));
 const BulkAttachInboundsModal = lazy(() => import('./BulkAttachInboundsModal'));
 const BulkDetachInboundsModal = lazy(() => import('./BulkDetachInboundsModal'));
 const TextModal = lazy(() => import('@/components/feedback/TextModal'));
-const PromptModal = lazy(() => import('@/components/feedback/PromptModal'));
 import { emptyFilters, activeFilterCount } from './filters';
 import type { ClientFilters } from './filters';
 import './ClientsPage.css';
@@ -236,6 +236,7 @@ export default function ClientsPage() {
   const [qrOpen, setQrOpen] = useState(false);
   const [qrClient, setQrClient] = useState<ClientRecord | null>(null);
   const [bulkAddOpen, setBulkAddOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [bulkAdjustOpen, setBulkAdjustOpen] = useState(false);
   const [subLinksOpen, setSubLinksOpen] = useState(false);
   const [bulkGroupOpen, setBulkGroupOpen] = useState(false);
@@ -247,12 +248,6 @@ export default function ClientsPage() {
   const [textTitle, setTextTitle] = useState('');
   const [textContent, setTextContent] = useState('');
   const [textFileName, setTextFileName] = useState('');
-  const [promptOpen, setPromptOpen] = useState(false);
-  const [promptTitle, setPromptTitle] = useState('');
-  const [promptOkText, setPromptOkText] = useState('');
-  const [promptInitial, setPromptInitial] = useState('');
-  const [promptLoading, setPromptLoading] = useState(false);
-  const [promptHandler, setPromptHandler] = useState<((value: string) => Promise<boolean | void> | boolean | void) | null>(null);
 
   const initial = readFilterState();
   const [searchKey, setSearchKey] = useState(initial.searchKey);
@@ -518,33 +513,6 @@ export default function ClientsPage() {
     setTextOpen(true);
   }, []);
 
-  const openPrompt = useCallback((opts: {
-    title: string;
-    okText?: string;
-    value?: string;
-    confirm: (value: string) => Promise<boolean | void> | boolean | void;
-  }) => {
-    setPromptTitle(opts.title);
-    setPromptOkText(opts.okText || t('confirm'));
-    setPromptInitial(opts.value || '');
-    setPromptHandler(() => opts.confirm);
-    setPromptOpen(true);
-  }, [t]);
-
-  const onPromptConfirm = useCallback(async (value: string) => {
-    if (!promptHandler) {
-      setPromptOpen(false);
-      return;
-    }
-    setPromptLoading(true);
-    try {
-      const ok = await promptHandler(value);
-      if (ok !== false) setPromptOpen(false);
-    } finally {
-      setPromptLoading(false);
-    }
-  }, [promptHandler]);
-
   function onResetAllTraffics() {
     modal.confirm({
       title: t('pages.clients.resetAllTrafficsTitle'),
@@ -604,26 +572,7 @@ export default function ClientsPage() {
   }
 
   function onImportClients() {
-    openPrompt({
-      title: t('pages.clients.importClients'),
-      okText: t('pages.clients.import'),
-      value: '',
-      confirm: async (value) => {
-        const msg = await importClients(value);
-        if (!msg?.success) return false;
-        const created = msg.obj?.created ?? 0;
-        const skipped = msg.obj?.skipped ?? [];
-        if (skipped.length === 0) {
-          messageApi.success(t('pages.clients.toasts.imported', { count: created }));
-        } else {
-          const firstError = skipped[0]?.reason ?? '';
-          messageApi.warning(firstError
-            ? `${t('pages.clients.toasts.importedMixed', { ok: created, failed: skipped.length })} — ${firstError}`
-            : t('pages.clients.toasts.importedMixed', { ok: created, failed: skipped.length }));
-        }
-        return true;
-      },
-    });
+    setImportOpen(true);
   }
 
   function onBulkUngroup() {
@@ -705,17 +654,27 @@ export default function ClientsPage() {
   const onSave = useCallback(async (
     payload: Record<string, unknown> | { client: Record<string, unknown>; inboundIds: number[] },
     meta:
-      | { isEdit: false; email: string; externalLinks: ExternalLinkInput[] }
-      | { isEdit: true; email: string; attach: number[]; detach: number[]; externalLinks: ExternalLinkInput[] },
+      | {
+        isEdit: false;
+        email: string;
+        externalLinks: ExternalLinkInput[];
+        subscriptionProfile: object;
+        directIncludes: string;
+        directExcludes: string;
+      }
+      | {
+        isEdit: true;
+        email: string;
+        attach: number[];
+        detach: number[];
+        externalLinks: ExternalLinkInput[];
+        subscriptionProfile: object;
+        directIncludes: string;
+        directExcludes: string;
+      },
   ) => {
     if (!meta.isEdit) {
-      const createMsg = await create(payload);
-      if (!createMsg?.success) return createMsg;
-      if (meta.email && meta.externalLinks.length > 0) {
-        const r = await setExternalLinks(meta.email, meta.externalLinks);
-        if (!r?.success) return r;
-      }
-      return createMsg;
+      return create(payload);
     }
     const updateMsg = await update(meta.email, payload);
     if (!updateMsg?.success) return updateMsg;
@@ -732,6 +691,22 @@ export default function ClientsPage() {
     // Always replace the client's external links (an empty set clears them).
     const r = await setExternalLinks(emailKey, meta.externalLinks);
     if (!r?.success) return r;
+    const profileResult = await HttpUtil.post(
+      `/panel/api/clients/${encodeURIComponent(emailKey)}/subscriptionProfile`,
+      meta.subscriptionProfile,
+      { headers: { 'Content-Type': 'application/json' } },
+    );
+    if (!profileResult?.success) return profileResult;
+    const directResult = await HttpUtil.post(
+      '/panel/api/directDomains/replace',
+      {
+        clientEmail: emailKey,
+        includes: meta.directIncludes,
+        excludes: meta.directExcludes,
+      },
+      { headers: { 'Content-Type': 'application/json' } },
+    );
+    if (!directResult?.success) return directResult;
     return updateMsg;
   }, [create, update, attach, detach, setExternalLinks]);
 
@@ -1472,6 +1447,7 @@ export default function ClientsPage() {
             attachedIds={editingAttachedIds}
             attachedExternalLinks={editingExternalLinks}
             inbounds={inbounds}
+            nodes={nodes}
             tgBotEnable={tgBotEnable}
             groups={allGroups}
             save={onSave}
@@ -1505,6 +1481,14 @@ export default function ClientsPage() {
             groups={allGroups}
             onOpenChange={setBulkAddOpen}
             onSaved={() => setBulkAddOpen(false)}
+          />
+        </LazyMount>
+        <LazyMount when={importOpen}>
+          <ClientImportModal
+            open={importOpen}
+            importClients={importClients}
+            onOpenChange={setImportOpen}
+            onSaved={refresh}
           />
         </LazyMount>
         <LazyMount when={bulkAdjustOpen}>
@@ -1599,18 +1583,6 @@ export default function ClientsPage() {
             content={textContent}
             fileName={textFileName}
             json
-          />
-        </LazyMount>
-        <LazyMount when={promptOpen}>
-          <PromptModal
-            open={promptOpen}
-            onClose={() => setPromptOpen(false)}
-            title={promptTitle}
-            okText={promptOkText}
-            initialValue={promptInitial}
-            loading={promptLoading}
-            json
-            onConfirm={onPromptConfirm}
           />
         </LazyMount>
       </Layout>

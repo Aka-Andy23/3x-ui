@@ -913,21 +913,86 @@ func (ClientInbound) TableName() string { return "client_inbounds" }
 //   - "subscription": a remote subscription URL. The panel fetches it (cached),
 //     decodes its links, and merges them into the client's subscription.
 type ClientExternalLink struct {
-	Id        int    `json:"id" gorm:"primaryKey;autoIncrement"`
-	ClientId  int    `json:"clientId" gorm:"index;column:client_id"`
-	Kind      string `json:"kind" gorm:"column:kind"`
-	Value     string `json:"value" gorm:"column:value"`
-	Remark    string `json:"remark" gorm:"column:remark"`
-	SortIndex int    `json:"sortIndex" gorm:"column:sort_index"`
-	CreatedAt int64  `json:"createdAt" gorm:"autoCreateTime:milli"`
+	Id                    int    `json:"id" gorm:"primaryKey;autoIncrement"`
+	ClientId              int    `json:"clientId" gorm:"index;column:client_id"`
+	Kind                  string `json:"kind" gorm:"column:kind"`
+	Value                 string `json:"value" gorm:"column:value;type:text"`
+	Remark                string `json:"remark" gorm:"column:remark"`
+	Comment               string `json:"comment" gorm:"column:comment"`
+	Enabled               bool   `json:"enabled" gorm:"column:enabled;default:true"`
+	Priority              int    `json:"priority" gorm:"column:priority;default:0"`
+	SortIndex             int    `json:"sortIndex" gorm:"column:sort_index"`
+	UpdateIntervalMinutes int    `json:"updateIntervalMinutes" gorm:"column:update_interval_minutes;default:60"`
+	TimeoutSeconds        int    `json:"timeoutSeconds" gorm:"column:timeout_seconds;default:8"`
+	MaxResponseBytes      int64  `json:"maxResponseBytes" gorm:"column:max_response_bytes;default:2097152"`
+	MaxRedirects          int    `json:"maxRedirects" gorm:"column:max_redirects;default:3"`
+	LastGoodJSON          string `json:"-" gorm:"column:last_good_json;type:text"`
+	LastSuccessAt         int64  `json:"lastSuccessAt" gorm:"column:last_success_at;default:0"`
+	LastAttemptAt         int64  `json:"lastAttemptAt" gorm:"column:last_attempt_at;default:0"`
+	LastError             string `json:"lastError" gorm:"column:last_error"`
+	LastHTTPStatus        int    `json:"lastHttpStatus" gorm:"column:last_http_status;default:0"`
+	RemoteETag            string `json:"-" gorm:"column:remote_etag"`
+	RemoteLastModified    string `json:"-" gorm:"column:remote_last_modified"`
+	CreatedAt             int64  `json:"createdAt" gorm:"autoCreateTime:milli"`
+	UpdatedAt             int64  `json:"updatedAt" gorm:"autoUpdateTime:milli"`
 }
 
 func (ClientExternalLink) TableName() string { return "client_external_links" }
 
 // External link kinds.
 const (
-	ExternalLinkKindLink         = "link"
-	ExternalLinkKindSubscription = "subscription"
+	ExternalLinkKindLink             = "link"
+	ExternalLinkKindSubscription     = "subscription"
+	ExternalLinkKindJSON             = "json"
+	ExternalLinkKindJSONSubscription = "json_subscription"
+)
+
+type ClientSubscriptionProfile struct {
+	Id                   int      `json:"id" gorm:"primaryKey;autoIncrement"`
+	ClientId             int      `json:"clientId" gorm:"uniqueIndex;not null;column:client_id"`
+	Enabled              bool     `json:"enabled" gorm:"default:true"`
+	DisplayName          string   `json:"displayName" gorm:"column:display_name"`
+	Language             string   `json:"language" gorm:"default:en;column:language"`
+	Title                string   `json:"title" gorm:"column:title"`
+	LinkExpiresAt        int64    `json:"linkExpiresAt" gorm:"column:link_expires_at;default:0"`
+	UpdateInterval       int      `json:"updateInterval" gorm:"column:update_interval;default:60"`
+	AutoSelectEnabled    bool     `json:"autoSelectEnabled" gorm:"column:auto_select_enabled;default:false"`
+	AutoSelectName       string   `json:"autoSelectName" gorm:"column:auto_select_name"`
+	AutoSelectCandidates []string `json:"autoSelectCandidates" gorm:"serializer:json;column:auto_select_candidates"`
+	ProbeURL             string   `json:"probeUrl" gorm:"column:probe_url"`
+	ProbeTimeoutSeconds  int      `json:"probeTimeoutSeconds" gorm:"column:probe_timeout_seconds;default:5"`
+	ProbeIntervalSeconds int      `json:"probeIntervalSeconds" gorm:"column:probe_interval_seconds;default:300"`
+	FallbackTag          string   `json:"fallbackTag" gorm:"column:fallback_tag"`
+	SwitchThresholdMs    int      `json:"switchThresholdMs" gorm:"column:switch_threshold_ms;default:0"`
+	DebounceSeconds      int      `json:"debounceSeconds" gorm:"column:debounce_seconds;default:0"`
+	Status               string   `json:"status" gorm:"column:status;default:pending"`
+	LastGeneratedAt      int64    `json:"lastGeneratedAt" gorm:"column:last_generated_at;default:0"`
+	LastValidatedAt      int64    `json:"lastValidatedAt" gorm:"column:last_validated_at;default:0"`
+	LastError            string   `json:"lastError" gorm:"column:last_error"`
+	ContentHash          string   `json:"contentHash" gorm:"column:content_hash"`
+	CreatedAt            int64    `json:"createdAt" gorm:"autoCreateTime:milli"`
+	UpdatedAt            int64    `json:"updatedAt" gorm:"autoUpdateTime:milli"`
+}
+
+func (ClientSubscriptionProfile) TableName() string { return "client_subscription_profiles" }
+
+type DirectDomain struct {
+	Id            int    `json:"id" gorm:"primaryKey;autoIncrement"`
+	ClientId      int    `json:"clientId" gorm:"column:client_id;default:0;uniqueIndex:idx_direct_domain_scope,priority:1"`
+	Mode          string `json:"mode" gorm:"column:mode;uniqueIndex:idx_direct_domain_scope,priority:2"`
+	Domain        string `json:"domain" gorm:"column:domain;uniqueIndex:idx_direct_domain_scope,priority:3"`
+	DisplayDomain string `json:"displayDomain" gorm:"column:display_domain"`
+	Comment       string `json:"comment" gorm:"column:comment"`
+	Enabled       bool   `json:"enabled" gorm:"column:enabled;default:true"`
+	CreatedAt     int64  `json:"createdAt" gorm:"autoCreateTime:milli"`
+	UpdatedAt     int64  `json:"updatedAt" gorm:"autoUpdateTime:milli"`
+}
+
+func (DirectDomain) TableName() string { return "direct_domains" }
+
+const (
+	DirectDomainModeInclude = "include"
+	DirectDomainModeExclude = "exclude"
 )
 
 type InboundFallback struct {

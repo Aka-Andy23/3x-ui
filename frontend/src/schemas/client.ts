@@ -92,9 +92,24 @@ export const ClientPageResponseSchema = z.object({
 // A per-client external link surfaced in the client's subscription:
 // kind=link is a single share link, kind=subscription is a remote sub URL.
 export const ExternalLinkSchema = z.object({
-  kind: z.enum(['link', 'subscription']).default('link'),
+  id: z.number().optional(),
+  kind: z.enum(['link', 'subscription', 'json', 'json_subscription']).default('link'),
   value: z.string(),
   remark: z.string().optional().default(''),
+  comment: z.string().optional().default(''),
+  enabled: z.boolean().optional().default(true),
+  priority: z.number().optional().default(0),
+  sortIndex: z.number().optional().default(0),
+  updateIntervalMinutes: z.number().optional().default(60),
+  timeoutSeconds: z.number().optional().default(8),
+  maxResponseBytes: z.number().optional().default(2097152),
+  maxRedirects: z.number().optional().default(3),
+  lastSuccessAt: z.number().optional().default(0),
+  lastAttemptAt: z.number().optional().default(0),
+  lastError: z.string().optional().default(''),
+  lastHttpStatus: z.number().optional().default(0),
+  createdAt: z.number().optional().default(0),
+  updatedAt: z.number().optional().default(0),
 }).loose();
 
 export const ExternalLinkListSchema = z.array(ExternalLinkSchema).nullable().transform((v) => v ?? []);
@@ -103,6 +118,7 @@ export const ClientHydrateSchema = z.object({
   client: ClientRecordSchema,
   inboundIds: nullableNumberArray,
   externalLinks: ExternalLinkListSchema.optional(),
+  happUrl: z.string().optional(),
 });
 
 export const BulkAdjustResultSchema = z.object({

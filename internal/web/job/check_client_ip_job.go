@@ -25,6 +25,7 @@ import (
 type IPWithTimestamp struct {
 	IP        string `json:"ip"`
 	Timestamp int64  `json:"timestamp"`
+	FirstSeen int64  `json:"firstSeen,omitempty"`
 }
 
 // CheckClientIpJob monitors client IP addresses and manages IP blocking based
@@ -313,7 +314,7 @@ func (j *CheckClientIpJob) processObserved(observed map[string]map[string]int64,
 		ipsWithTime := make([]IPWithTimestamp, 0, len(ipTimestamps))
 		attrEntries := make([]model.ClientIpEntry, 0, len(ipTimestamps))
 		for ip, timestamp := range ipTimestamps {
-			ipsWithTime = append(ipsWithTime, IPWithTimestamp{IP: ip, Timestamp: timestamp})
+			ipsWithTime = append(ipsWithTime, IPWithTimestamp{IP: ip, Timestamp: timestamp, FirstSeen: timestamp})
 			// Live API observations may carry an old lastSeen (connection start),
 			// so stamp attribution with now; otherwise the stale cutoff would evict
 			// an IP that is connected right now.
@@ -321,7 +322,7 @@ func (j *CheckClientIpJob) processObserved(observed map[string]map[string]int64,
 			if observedAreLive {
 				attrTs = now
 			}
-			attrEntries = append(attrEntries, model.ClientIpEntry{IP: ip, Timestamp: attrTs})
+			attrEntries = append(attrEntries, model.ClientIpEntry{IP: ip, Timestamp: attrTs, FirstSeen: timestamp})
 		}
 		if len(attrEntries) > 0 {
 			attribution[email] = attrEntries
@@ -439,6 +440,32 @@ func partitionLiveIps(ipMap map[string]int64, observedThisScan map[string]bool) 
 	return live, historical
 }
 
+func collectFirstSeen(old, incoming []IPWithTimestamp) map[string]int64 {
+	out := make(map[string]int64, len(old)+len(incoming))
+	for _, entry := range append(append([]IPWithTimestamp{}, old...), incoming...) {
+		first := entry.FirstSeen
+		if first <= 0 {
+			first = entry.Timestamp
+		}
+		if first <= 0 {
+			continue
+		}
+		if current, ok := out[entry.IP]; !ok || first < current {
+			out[entry.IP] = first
+		}
+	}
+	return out
+}
+
+func applyFirstSeen(entries []IPWithTimestamp, firstSeen map[string]int64) {
+	for index := range entries {
+		entries[index].FirstSeen = firstSeen[entries[index].IP]
+		if entries[index].FirstSeen <= 0 {
+			entries[index].FirstSeen = entries[index].Timestamp
+		}
+	}
+}
+
 func (j *CheckClientIpJob) checkFail2BanInstalled() bool {
 	if !isFail2BanEnabled() {
 		return false
@@ -480,24 +507,28 @@ func (j *CheckClientIpJob) updateInboundClientIps(tx *gorm.DB, inboundClientIps 
 		return false, false
 	}
 
+	var oldIpsWithTime []IPWithTimestamp
+	if inboundClientIps.Ips != "" {
+		_ = json.Unmarshal([]byte(inboundClientIps.Ips), &oldIpsWithTime)
+	}
+	firstSeen := collectFirstSeen(oldIpsWithTime, newIpsWithTime)
+
+	ipMap := mergeClientIps(oldIpsWithTime, newIpsWithTime, time.Now().Unix()-ipStaleAfterSeconds, observedAreLive)
 	if !enforce || limitIp <= 0 || !inbound.Enable {
-		// Nothing to enforce (collection-only run, no limit on the clients row,
-		// or inbound disabled): record the observed IPs for the panel and return.
-		jsonIps, _ := json.Marshal(newIpsWithTime)
+		observedThisScan := make(map[string]bool, len(newIpsWithTime))
+		for _, entry := range newIpsWithTime {
+			observedThisScan[entry.IP] = true
+		}
+		live, historical := partitionLiveIps(ipMap, observedThisScan)
+		dbIps := append(live, historical...)
+		applyFirstSeen(dbIps, firstSeen)
+		jsonIps, _ := json.Marshal(dbIps)
 		inboundClientIps.Ips = string(jsonIps)
 		if err := tx.Save(inboundClientIps).Error; err != nil {
 			logger.Error("failed to save inboundClientIps:", err)
 		}
 		return false, false
 	}
-
-	// Parse old IPs from database
-	var oldIpsWithTime []IPWithTimestamp
-	if inboundClientIps.Ips != "" {
-		_ = json.Unmarshal([]byte(inboundClientIps.Ips), &oldIpsWithTime)
-	}
-
-	ipMap := mergeClientIps(oldIpsWithTime, newIpsWithTime, time.Now().Unix()-ipStaleAfterSeconds, observedAreLive)
 
 	// only ips seen in this scan count toward the limit. see
 	// partitionLiveIps.
@@ -540,6 +571,7 @@ func (j *CheckClientIpJob) updateInboundClientIps(tx *gorm.DB, inboundClientIps 
 	dbIps := make([]IPWithTimestamp, 0, len(keptLive)+len(historicalIps))
 	dbIps = append(dbIps, keptLive...)
 	dbIps = append(dbIps, historicalIps...)
+	applyFirstSeen(dbIps, firstSeen)
 	jsonIps, _ := json.Marshal(dbIps)
 	inboundClientIps.Ips = string(jsonIps)
 

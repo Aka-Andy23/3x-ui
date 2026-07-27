@@ -32,9 +32,17 @@ if [ -z "$MTG_MULTI_VER" ]; then
 fi
 mkdir -p build/bin
 cd build/bin
-curl -sfLRO "https://github.com/XTLS/Xray-core/releases/download/v26.7.11/Xray-linux-${ARCH}.zip"
-unzip "Xray-linux-${ARCH}.zip"
-rm -f "Xray-linux-${ARCH}.zip" geoip.dat geosite.dat
+XRAY_ARCHIVE="Xray-linux-${ARCH}.zip"
+curl -sfLRO "https://github.com/XTLS/Xray-core/releases/download/v26.7.11/${XRAY_ARCHIVE}"
+curl -sfLRO "https://github.com/XTLS/Xray-core/releases/download/v26.7.11/${XRAY_ARCHIVE}.dgst"
+XRAY_EXPECTED_SHA256=$(sed -n 's/^SHA2-256= *//p' "${XRAY_ARCHIVE}.dgst")
+XRAY_ACTUAL_SHA256=$(sha256sum "${XRAY_ARCHIVE}" | awk '{print $1}')
+if [ -z "${XRAY_EXPECTED_SHA256}" ] || [ "${XRAY_EXPECTED_SHA256}" != "${XRAY_ACTUAL_SHA256}" ]; then
+    echo "DockerInit: Xray SHA-256 verification failed" >&2
+    exit 1
+fi
+unzip "${XRAY_ARCHIVE}"
+rm -f "${XRAY_ARCHIVE}" "${XRAY_ARCHIVE}.dgst" geoip.dat geosite.dat
 mv xray "xray-linux-${FNAME}"
 # mtg-multi (MTProto sidecar) ships prebuilt release binaries for every target
 # we package, so download and unpack the matching one instead of compiling.

@@ -187,6 +187,33 @@ export default function SubscriptionFormatsTab({ allSetting, updateSetting }: Su
                 </SettingListItem>
               </>
             )}
+            {allSetting.subHappEnable && (
+              <>
+                <SettingListItem paddings="small" title={t('happ.settingsPath')} description={t('pages.settings.subPathDesc')}>
+                  <Input
+                    value={allSetting.subHappPath}
+                    placeholder="/happ/"
+                    onChange={(e) => updateSetting({ subHappPath: sanitizePath(e.target.value) })}
+                    onBlur={() => updateSetting({ subHappPath: normalizePath(allSetting.subHappPath) })}
+                  />
+                </SettingListItem>
+                <SettingListItem paddings="small" title={t('happ.settingsUri')} description={t('pages.settings.subURIDesc')}>
+                  <Input
+                    value={allSetting.subHappURI}
+                    placeholder="https://domain[:port]/happ/"
+                    onChange={(e) => updateSetting({ subHappURI: e.target.value })}
+                  />
+                </SettingListItem>
+                <SettingListItem paddings="small" title={t('happ.providerId')} description={t('happ.providerIdDesc')}>
+                  <Input
+                    value={allSetting.happProviderId}
+                    maxLength={8}
+                    status={allSetting.happProviderId !== '' && !/^[A-Za-z0-9]{8}$/.test(allSetting.happProviderId) ? 'error' : undefined}
+                    onChange={(e) => updateSetting({ happProviderId: e.target.value.trim() })}
+                  />
+                </SettingListItem>
+              </>
+            )}
           </>
         ),
       },

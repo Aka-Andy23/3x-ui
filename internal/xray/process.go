@@ -525,6 +525,18 @@ func (p *process) Start() (err error) {
 	if p.configPath != "" {
 		configPath = p.configPath
 	}
+	if err := ValidateConfigBytes(GetBinaryPath(), filepath.Dir(configPath), data); err != nil {
+		return common.NewErrorf("Xray configuration validation failed: %v", err)
+	}
+	if p.configPath == "" {
+		if previous, readErr := os.ReadFile(configPath); readErr == nil {
+			if err := writeFileAtomic(configPath+".previous", previous, 0o600); err != nil {
+				return common.NewErrorf("Failed to back up previous Xray configuration: %v", err)
+			}
+		} else if !os.IsNotExist(readErr) {
+			return common.NewErrorf("Failed to read previous Xray configuration: %v", readErr)
+		}
+	}
 	err = writeFileAtomic(configPath, data, 0o600)
 	if err != nil {
 		return common.NewErrorf("Failed to write configuration file: %v", err)
@@ -543,6 +555,55 @@ func (p *process) Start() (err error) {
 	p.refreshAPIPort()
 
 	return nil
+}
+
+func ValidateConfigFile(binaryPath, configPath string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, binaryPath, "run", "-test", "-c", configPath)
+	output, err := cmd.CombinedOutput()
+	if ctx.Err() != nil {
+		return errors.New("validation timed out")
+	}
+	if err != nil {
+		message := strings.TrimSpace(string(output))
+		if len(message) > 2048 {
+			message = message[:2048]
+		}
+		if message == "" {
+			message = err.Error()
+		}
+		return errors.New(message)
+	}
+	return nil
+}
+
+func ValidateConfigBytes(binaryPath, directory string, data []byte) error {
+	if err := os.MkdirAll(directory, 0o755); err != nil {
+		return err
+	}
+	file, err := os.CreateTemp(directory, ".config-validate-*.json")
+	if err != nil {
+		return err
+	}
+	path := file.Name()
+	defer os.Remove(path)
+	if err := file.Chmod(0o600); err != nil {
+		_ = file.Close()
+		return err
+	}
+	if _, err := file.Write(data); err != nil {
+		_ = file.Close()
+		return err
+	}
+	if err := file.Sync(); err != nil {
+		_ = file.Close()
+		return err
+	}
+	if err := file.Close(); err != nil {
+		return err
+	}
+	return ValidateConfigFile(binaryPath, path)
 }
 
 // writeFileAtomic writes data to path via a same-directory temp file that is

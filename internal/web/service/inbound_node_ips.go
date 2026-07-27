@@ -2,7 +2,9 @@ package service
 
 import (
 	"encoding/json"
+	"slices"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/mhsanaei/3x-ui/v3/internal/database"
@@ -22,24 +24,38 @@ import (
 // older than cutoff, keeps the newest timestamp per IP, and sorts newest-first.
 // It mirrors mergeClientIpEntries but operates on the exported wire type.
 func mergeModelClientIpEntries(old, incoming []model.ClientIpEntry, cutoff int64) []model.ClientIpEntry {
-	ipMap := make(map[string]int64, len(old)+len(incoming))
+	ipMap := make(map[string]model.ClientIpEntry, len(old)+len(incoming))
 	for _, e := range old {
 		if e.IP == "" || e.Timestamp < cutoff {
 			continue
 		}
-		ipMap[e.IP] = e.Timestamp
+		if e.FirstSeen <= 0 {
+			e.FirstSeen = e.Timestamp
+		}
+		ipMap[e.IP] = e
 	}
 	for _, e := range incoming {
 		if e.IP == "" || e.Timestamp < cutoff {
 			continue
 		}
-		if cur, ok := ipMap[e.IP]; !ok || e.Timestamp > cur {
-			ipMap[e.IP] = e.Timestamp
+		if e.FirstSeen <= 0 {
+			e.FirstSeen = e.Timestamp
+		}
+		if cur, ok := ipMap[e.IP]; !ok {
+			ipMap[e.IP] = e
+		} else {
+			if e.Timestamp > cur.Timestamp {
+				cur.Timestamp = e.Timestamp
+			}
+			if e.FirstSeen > 0 && (cur.FirstSeen <= 0 || e.FirstSeen < cur.FirstSeen) {
+				cur.FirstSeen = e.FirstSeen
+			}
+			ipMap[e.IP] = cur
 		}
 	}
 	out := make([]model.ClientIpEntry, 0, len(ipMap))
-	for ip, ts := range ipMap {
-		out = append(out, model.ClientIpEntry{IP: ip, Timestamp: ts})
+	for _, entry := range ipMap {
+		out = append(out, entry)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Timestamp > out[j].Timestamp })
 	return out
@@ -216,9 +232,12 @@ func (s *InboundService) GetClientIpNodeAttribution(email string) (map[string]st
 // ClientIpInfo is one IP shown in the panel's per-client IP log, labelled with
 // the node it is connecting through ("" = this local panel).
 type ClientIpInfo struct {
-	IP   string `json:"ip"`
-	Time string `json:"time"`
-	Node string `json:"node"`
+	IP        string `json:"ip"`
+	Time      string `json:"time"`
+	FirstSeen string `json:"firstSeen"`
+	LastSeen  string `json:"lastSeen"`
+	Node      string `json:"node"`
+	Inbound   string `json:"inbound"`
 }
 
 // GetClientIpsWithNodes returns a client's recorded IPs (from the flat
@@ -250,6 +269,7 @@ func (s *InboundService) GetClientIpsWithNodes(email string) ([]ClientIpInfo, er
 	attr, _ := s.GetClientIpNodeAttribution(email)
 	guidName := s.nodeGuidNameMap()
 	localGuid, _ := (&SettingService{}).GetPanelGuid()
+	inboundsByGuid := s.clientInboundLabelsByGuid(email, localGuid)
 
 	out := make([]ClientIpInfo, 0, len(entries))
 	for _, e := range entries {
@@ -259,13 +279,67 @@ func (s *InboundService) GetClientIpsWithNodes(email string) ([]ClientIpInfo, er
 		info := ClientIpInfo{IP: e.IP}
 		if e.Timestamp > 0 {
 			info.Time = time.Unix(e.Timestamp, 0).Local().Format("2006-01-02 15:04:05")
+			info.LastSeen = info.Time
+		}
+		firstSeen := e.FirstSeen
+		if firstSeen <= 0 {
+			firstSeen = e.Timestamp
+		}
+		if firstSeen > 0 {
+			info.FirstSeen = time.Unix(firstSeen, 0).Local().Format("2006-01-02 15:04:05")
 		}
 		if guid, ok := attr[e.IP]; ok && guid != "" && guid != localGuid {
 			info.Node = guidName[guid]
+			info.Inbound = strings.Join(inboundsByGuid[guid], ", ")
+		} else {
+			info.Inbound = strings.Join(inboundsByGuid[localGuid], ", ")
 		}
 		out = append(out, info)
 	}
 	return out, nil
+}
+
+func (s *InboundService) clientInboundLabelsByGuid(email, localGuid string) map[string][]string {
+	db := database.GetDB()
+	var inbounds []model.Inbound
+	if err := db.Table("inbounds").
+		Select("inbounds.*").
+		Joins("JOIN client_inbounds ON client_inbounds.inbound_id = inbounds.id").
+		Joins("JOIN clients ON clients.id = client_inbounds.client_id").
+		Where("clients.email = ?", email).
+		Find(&inbounds).Error; err != nil {
+		return map[string][]string{}
+	}
+	var nodes []model.Node
+	_ = db.Find(&nodes).Error
+	ptrs := make([]*model.Node, len(nodes))
+	for index := range nodes {
+		ptrs[index] = &nodes[index]
+	}
+	ambiguous := ambiguousNodeGuids(ptrs, localGuid)
+	nodeKeys := make(map[int]string, len(nodes))
+	for index := range nodes {
+		nodeKeys[nodes[index].Id] = effectiveNodeGuid(&nodes[index], ambiguous)
+	}
+	out := make(map[string][]string)
+	for _, inbound := range inbounds {
+		guid := localGuid
+		if inbound.NodeID != nil {
+			guid = nodeKeys[*inbound.NodeID]
+		}
+		label := strings.TrimSpace(inbound.Remark)
+		if label == "" {
+			label = strings.TrimSpace(inbound.Tag)
+		}
+		if label == "" {
+			label = string(inbound.Protocol)
+		}
+		if !slices.Contains(out[guid], label) {
+			out[guid] = append(out[guid], label)
+			sort.Strings(out[guid])
+		}
+	}
+	return out
 }
 
 // nodeGuidNameMap maps each known node's attribution key to its display name,

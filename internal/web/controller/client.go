@@ -1,11 +1,16 @@
 package controller
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/mhsanaei/3x-ui/v3/internal/database/model"
+	"github.com/mhsanaei/3x-ui/v3/internal/sub"
 	"github.com/mhsanaei/3x-ui/v3/internal/web/service"
 	"github.com/mhsanaei/3x-ui/v3/internal/web/websocket"
 
@@ -51,6 +56,9 @@ func (a *ClientController) initRouter(g *gin.RouterGroup) {
 	g.GET("/traffic/:email", a.getTrafficByEmail)
 	g.GET("/subLinks/:subId", a.getSubLinks)
 	g.GET("/links/:email", a.getClientLinks)
+	g.GET("/:email/subscriptionProfile", a.getSubscriptionProfile)
+	g.GET("/:email/happPreview", a.previewHapp)
+	g.GET("/:email/ipLimitEvents", a.ipLimitEvents)
 
 	g.POST("/add", a.create)
 	g.POST("/update/:email", a.update)
@@ -58,6 +66,9 @@ func (a *ClientController) initRouter(g *gin.RouterGroup) {
 	g.POST("/:email/attach", a.attach)
 	g.POST("/:email/detach", a.detach)
 	g.POST("/:email/externalLinks", a.setExternalLinks)
+	g.POST("/:email/subscriptionProfile", a.setSubscriptionProfile)
+	g.POST("/:email/happRegenerate", a.regenerateHapp)
+	g.POST("/externalSources/:id/refresh", a.refreshExternalSource)
 	g.GET("/export", a.export)
 	g.POST("/import", a.importClients)
 	g.POST("/delOrphans", a.delOrphans)
@@ -135,7 +146,14 @@ func (a *ClientController) get(c *gin.Context) {
 	if t, tErr := a.inboundService.GetClientTrafficByEmail(email); tErr == nil && t != nil {
 		usedTraffic = t.Up + t.Down
 	}
-	jsonObj(c, gin.H{"client": rec, "inboundIds": inboundIds, "externalLinks": externalLinks, "usedTraffic": usedTraffic}, nil)
+	happURL := ""
+	happEnabled, _ := a.settingService.GetSubHappEnable()
+	if happEnabled {
+		if base, getErr := a.settingService.GetSubHappURI(); getErr == nil && strings.TrimSpace(base) != "" {
+			happURL = strings.TrimRight(base, "/") + "/" + rec.SubID
+		}
+	}
+	jsonObj(c, gin.H{"client": rec, "inboundIds": inboundIds, "externalLinks": externalLinks, "usedTraffic": usedTraffic, "happUrl": happURL}, nil)
 }
 
 func (a *ClientController) create(c *gin.Context) {
@@ -231,6 +249,83 @@ func (a *ClientController) setExternalLinks(c *gin.Context) {
 	}
 	jsonMsg(c, I18nWeb(c, "pages.inbounds.toasts.inboundClientUpdateSuccess"), nil)
 	notifyClientsChanged()
+}
+
+func (a *ClientController) getSubscriptionProfile(c *gin.Context) {
+	profile, err := a.clientService.GetSubscriptionProfileByEmail(c.Param("email"))
+	if err != nil {
+		jsonMsg(c, I18nWeb(c, "get"), err)
+		return
+	}
+	jsonObj(c, profile, nil)
+}
+
+func (a *ClientController) setSubscriptionProfile(c *gin.Context) {
+	var input service.SubscriptionProfileInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
+		return
+	}
+	profile, err := a.clientService.SaveSubscriptionProfileByEmail(c.Param("email"), input)
+	if err != nil {
+		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
+		return
+	}
+	jsonMsgObj(c, I18nWeb(c, "pages.inbounds.toasts.inboundClientUpdateSuccess"), profile, nil)
+	notifyClientsChanged()
+}
+
+func (a *ClientController) refreshExternalSource(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
+		return
+	}
+	source, err := a.clientService.RefreshExternalJSONSource(id)
+	if err != nil {
+		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
+		return
+	}
+	jsonMsgObj(c, I18nWeb(c, "pages.inbounds.toasts.inboundClientUpdateSuccess"), source, nil)
+	notifyClientsChanged()
+}
+
+func (a *ClientController) previewHapp(c *gin.Context) {
+	a.generateHapp(c, false)
+}
+
+func (a *ClientController) regenerateHapp(c *gin.Context) {
+	a.generateHapp(c, true)
+}
+
+func (a *ClientController) generateHapp(c *gin.Context, force bool) {
+	rec, err := a.clientService.GetRecordByEmail(nil, c.Param("email"))
+	if err != nil {
+		jsonMsg(c, I18nWeb(c, "get"), err)
+		return
+	}
+	generated, err := sub.GenerateHapp(rec.SubID, resolveHost(c), force)
+	if err != nil {
+		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
+		return
+	}
+	if generated == nil {
+		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), errors.New("subscription is unavailable"))
+		return
+	}
+	var document any
+	if err := json.Unmarshal([]byte(generated.JSON), &document); err != nil {
+		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
+		return
+	}
+	jsonObj(c, gin.H{
+		"document":       document,
+		"etag":           generated.ETag,
+		"title":          generated.Title,
+		"partial":        generated.Partial,
+		"warnings":       generated.Warnings,
+		"lastModifiedAt": generated.LastModifiedAt,
+	}, nil)
 }
 
 func (a *ClientController) resetAllTraffics(c *gin.Context) {
@@ -371,6 +466,7 @@ func (a *ClientController) bulkSetEnable(c *gin.Context, enable bool) {
 }
 
 func (a *ClientController) bulkCreate(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, service.MaxClientImportBytes)
 	var payloads []service.ClientCreatePayload
 	if err := c.ShouldBindJSON(&payloads); err != nil {
 		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
@@ -421,6 +517,7 @@ type importClientsRequest struct {
 // mirroring the inbound import flow. The data string is itself a JSON-encoded
 // []ClientCreatePayload, so it is unmarshalled in a second step.
 func (a *ClientController) importClients(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, service.MaxClientImportBytes)
 	var req importClientsRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
@@ -493,6 +590,11 @@ func (a *ClientController) getIps(c *gin.Context) {
 	jsonObj(c, infos, err)
 }
 
+func (a *ClientController) ipLimitEvents(c *gin.Context) {
+	events, err := a.inboundService.GetClientIPLimitEvents(c.Param("email"), 50)
+	jsonObj(c, events, err)
+}
+
 func (a *ClientController) clientIpsByGuid(c *gin.Context) {
 	data, err := a.inboundService.GetClientIpsByGuid()
 	jsonObj(c, data, err)
@@ -500,11 +602,14 @@ func (a *ClientController) clientIpsByGuid(c *gin.Context) {
 
 func (a *ClientController) clearIps(c *gin.Context) {
 	email := c.Param("email")
-	if err := a.inboundService.ClearClientIps(email); err != nil {
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
+	defer cancel()
+	failedNodes, err := a.inboundService.ClearClientIpsCluster(ctx, email)
+	if err != nil {
 		jsonMsg(c, I18nWeb(c, "pages.inbounds.toasts.updateSuccess"), err)
 		return
 	}
-	jsonMsg(c, I18nWeb(c, "pages.inbounds.toasts.logCleanSuccess"), nil)
+	jsonMsgObj(c, I18nWeb(c, "pages.inbounds.toasts.logCleanSuccess"), gin.H{"failedNodes": failedNodes}, nil)
 }
 
 func (a *ClientController) onlines(c *gin.Context) {

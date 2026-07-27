@@ -860,6 +860,11 @@ func (r *Remote) PushAllClientIps(ctx context.Context, ips []model.InboundClient
 	return err
 }
 
+func (r *Remote) ClearClientIps(ctx context.Context, email string) error {
+	_, err := r.do(ctx, http.MethodPost, "panel/api/server/clientIps/clear/"+url.PathEscape(email), nil)
+	return err
+}
+
 // FetchClientIpsByGuid pulls the node's per-node IP attribution subtree
 // (guid -> email -> observed IPs). Unlike FetchAllClientIps (the flat union the
 // master also pushes back), this preserves which physical node each IP is on.

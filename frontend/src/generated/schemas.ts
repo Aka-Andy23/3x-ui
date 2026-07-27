@@ -15,6 +15,9 @@ export const SCHEMAS: Record<string, unknown> = {
       "externalTrafficInformURI": {
         "type": "string"
       },
+      "happProviderId": {
+        "type": "string"
+      },
       "ldapAutoCreate": {
         "type": "boolean"
       },
@@ -171,6 +174,15 @@ export const SCHEMAS: Record<string, unknown> = {
       "subEncrypt": {
         "type": "boolean"
       },
+      "subHappEnable": {
+        "type": "boolean"
+      },
+      "subHappPath": {
+        "type": "string"
+      },
+      "subHappURI": {
+        "type": "string"
+      },
       "subHideSettings": {
         "type": "boolean"
       },
@@ -319,6 +331,7 @@ export const SCHEMAS: Record<string, unknown> = {
       "expireDiff",
       "externalTrafficInformEnable",
       "externalTrafficInformURI",
+      "happProviderId",
       "ldapAutoCreate",
       "ldapAutoDelete",
       "ldapBaseDN",
@@ -366,6 +379,9 @@ export const SCHEMAS: Record<string, unknown> = {
       "subEnable",
       "subEnableRouting",
       "subEncrypt",
+      "subHappEnable",
+      "subHappPath",
+      "subHappURI",
       "subHideSettings",
       "subIncyEnableRouting",
       "subIncyRoutingRules",
@@ -425,6 +441,9 @@ export const SCHEMAS: Record<string, unknown> = {
         "type": "boolean"
       },
       "externalTrafficInformURI": {
+        "type": "string"
+      },
+      "happProviderId": {
         "type": "string"
       },
       "hasApiToken": {
@@ -604,6 +623,15 @@ export const SCHEMAS: Record<string, unknown> = {
       "subEncrypt": {
         "type": "boolean"
       },
+      "subHappEnable": {
+        "type": "boolean"
+      },
+      "subHappPath": {
+        "type": "string"
+      },
+      "subHappURI": {
+        "type": "string"
+      },
       "subHideSettings": {
         "type": "boolean"
       },
@@ -752,6 +780,7 @@ export const SCHEMAS: Record<string, unknown> = {
       "expireDiff",
       "externalTrafficInformEnable",
       "externalTrafficInformURI",
+      "happProviderId",
       "hasApiToken",
       "hasLdapPassword",
       "hasNordSecret",
@@ -806,6 +835,9 @@ export const SCHEMAS: Record<string, unknown> = {
       "subEnable",
       "subEnableRouting",
       "subEncrypt",
+      "subHappEnable",
+      "subHappPath",
+      "subHappURI",
       "subHideSettings",
       "subIncyEnableRouting",
       "subIncyRoutingRules",

@@ -84,6 +84,10 @@ type AllSetting struct {
 	SubURI                      string `json:"subURI" form:"subURI"`
 	SubJsonPath                 string `json:"subJsonPath" form:"subJsonPath"`
 	SubJsonURI                  string `json:"subJsonURI" form:"subJsonURI"`
+	SubHappEnable               bool   `json:"subHappEnable" form:"subHappEnable"`
+	SubHappPath                 string `json:"subHappPath" form:"subHappPath"`
+	SubHappURI                  string `json:"subHappURI" form:"subHappURI"`
+	HappProviderID              string `json:"happProviderId" form:"happProviderId"`
 	SubClashEnable              bool   `json:"subClashEnable" form:"subClashEnable"`
 	SubClashPath                string `json:"subClashPath" form:"subClashPath"`
 	SubClashURI                 string `json:"subClashURI" form:"subClashURI"`
@@ -189,6 +193,7 @@ func (s *AllSetting) CheckValid() error {
 		{"web base path", s.WebBasePath},
 		{"subscription path", s.SubPath},
 		{"subscription JSON path", s.SubJsonPath},
+		{"subscription Happ path", s.SubHappPath},
 		{"subscription Clash path", s.SubClashPath},
 	} {
 		if pathHasForbiddenChar(p.value) {
@@ -216,6 +221,13 @@ func (s *AllSetting) CheckValid() error {
 		s.SubJsonPath += "/"
 	}
 
+	if !strings.HasPrefix(s.SubHappPath, "/") {
+		s.SubHappPath = "/" + s.SubHappPath
+	}
+	if !strings.HasSuffix(s.SubHappPath, "/") {
+		s.SubHappPath += "/"
+	}
+
 	if !strings.HasPrefix(s.SubClashPath, "/") {
 		s.SubClashPath = "/" + s.SubClashPath
 	}
@@ -239,6 +251,17 @@ func (s *AllSetting) CheckValid() error {
 	_, err := time.LoadLocation(s.TimeLocation)
 	if err != nil {
 		return common.NewError("time location not exist:", s.TimeLocation)
+	}
+
+	if s.HappProviderID != "" {
+		if len(s.HappProviderID) != 8 {
+			return common.NewError("Happ Provider ID must contain 8 alphanumeric characters")
+		}
+		for _, r := range s.HappProviderID {
+			if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')) {
+				return common.NewError("Happ Provider ID must contain 8 alphanumeric characters")
+			}
+		}
 	}
 
 	return nil

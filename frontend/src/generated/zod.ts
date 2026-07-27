@@ -12,6 +12,9 @@ export type Protocol = z.infer<typeof ProtocolSchema>;
 export const SubLinkProviderSchema = z.unknown();
 export type SubLinkProvider = z.infer<typeof SubLinkProviderSchema>;
 
+export const clientIpResetRuntimeSchema = z.unknown();
+export type clientIpResetRuntime = z.infer<typeof clientIpResetRuntimeSchema>;
+
 export const staticEgressResolverSchema = z.string();
 export type staticEgressResolver = z.infer<typeof staticEgressResolverSchema>;
 
@@ -23,6 +26,7 @@ export const AllSettingSchema = z.object({
   expireDiff: z.number().int().min(0),
   externalTrafficInformEnable: z.boolean(),
   externalTrafficInformURI: z.string(),
+  happProviderId: z.string(),
   ldapAutoCreate: z.boolean(),
   ldapAutoDelete: z.boolean(),
   ldapBaseDN: z.string(),
@@ -70,6 +74,9 @@ export const AllSettingSchema = z.object({
   subEnable: z.boolean(),
   subEnableRouting: z.boolean(),
   subEncrypt: z.boolean(),
+  subHappEnable: z.boolean(),
+  subHappPath: z.string(),
+  subHappURI: z.string(),
   subHideSettings: z.boolean(),
   subIncyEnableRouting: z.boolean(),
   subIncyRoutingRules: z.string(),
@@ -121,6 +128,7 @@ export const AllSettingViewSchema = z.object({
   expireDiff: z.number().int().min(0),
   externalTrafficInformEnable: z.boolean(),
   externalTrafficInformURI: z.string(),
+  happProviderId: z.string(),
   hasApiToken: z.boolean(),
   hasLdapPassword: z.boolean(),
   hasNordSecret: z.boolean(),
@@ -175,6 +183,9 @@ export const AllSettingViewSchema = z.object({
   subEnable: z.boolean(),
   subEnableRouting: z.boolean(),
   subEncrypt: z.boolean(),
+  subHappEnable: z.boolean(),
+  subHappPath: z.string(),
+  subHappURI: z.string(),
   subHideSettings: z.boolean(),
   subIncyEnableRouting: z.boolean(),
   subIncyRoutingRules: z.string(),

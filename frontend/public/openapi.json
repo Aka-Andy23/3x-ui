@@ -41,6 +41,9 @@
           "externalTrafficInformURI": {
             "type": "string"
           },
+          "happProviderId": {
+            "type": "string"
+          },
           "ldapAutoCreate": {
             "type": "boolean"
           },
@@ -197,6 +200,15 @@
           "subEncrypt": {
             "type": "boolean"
           },
+          "subHappEnable": {
+            "type": "boolean"
+          },
+          "subHappPath": {
+            "type": "string"
+          },
+          "subHappURI": {
+            "type": "string"
+          },
           "subHideSettings": {
             "type": "boolean"
           },
@@ -345,6 +357,7 @@
           "expireDiff",
           "externalTrafficInformEnable",
           "externalTrafficInformURI",
+          "happProviderId",
           "ldapAutoCreate",
           "ldapAutoDelete",
           "ldapBaseDN",
@@ -392,6 +405,9 @@
           "subEnable",
           "subEnableRouting",
           "subEncrypt",
+          "subHappEnable",
+          "subHappPath",
+          "subHappURI",
           "subHideSettings",
           "subIncyEnableRouting",
           "subIncyRoutingRules",
@@ -451,6 +467,9 @@
             "type": "boolean"
           },
           "externalTrafficInformURI": {
+            "type": "string"
+          },
+          "happProviderId": {
             "type": "string"
           },
           "hasApiToken": {
@@ -630,6 +649,15 @@
           "subEncrypt": {
             "type": "boolean"
           },
+          "subHappEnable": {
+            "type": "boolean"
+          },
+          "subHappPath": {
+            "type": "string"
+          },
+          "subHappURI": {
+            "type": "string"
+          },
           "subHideSettings": {
             "type": "boolean"
           },
@@ -778,6 +806,7 @@
           "expireDiff",
           "externalTrafficInformEnable",
           "externalTrafficInformURI",
+          "happProviderId",
           "hasApiToken",
           "hasLdapPassword",
           "hasNordSecret",
@@ -832,6 +861,9 @@
           "subEnable",
           "subEnableRouting",
           "subEncrypt",
+          "subHappEnable",
+          "subHappPath",
+          "subHappURI",
           "subHideSettings",
           "subIncyEnableRouting",
           "subIncyRoutingRules",
@@ -2483,6 +2515,10 @@
     {
       "name": "Clients",
       "description": "Manage clients as first-class entities that can be attached to one or more inbounds. A single client row drives the settings.clients entry in every inbound it belongs to. Endpoints live under /panel/api/clients."
+    },
+    {
+      "name": "Direct domains",
+      "description": "Manage normalized global direct-routing domains and per-client additions or exclusions. Full URLs, Unicode IDNs, whitespace, commas, and line breaks are accepted by bulk import."
     },
     {
       "name": "Nodes",
@@ -5213,6 +5249,47 @@
         }
       }
     },
+    "/panel/api/server/clientIps/clear/{email}": {
+      "post": {
+        "tags": [
+          "Server"
+        ],
+        "summary": "Clear the active-IP state for one client on this node. The central panel uses this internal endpoint while coordinating a cluster-wide reset.",
+        "operationId": "post_panel_api_server_clientIps_clear_email",
+        "parameters": [
+          {
+            "name": "email",
+            "in": "path",
+            "required": true,
+            "description": "Exact client email.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "msg": {
+                      "type": "string"
+                    },
+                    "obj": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/panel/api/clients/list": {
       "get": {
         "tags": [
@@ -5742,7 +5819,7 @@
         "tags": [
           "Clients"
         ],
-        "summary": "Replace a client's external links (per-client share links and remote subscription URLs surfaced in their subscription). Sends the full set; the server replaces all rows.",
+        "summary": "Replace a client's external links and JSON sources. Manual JSON is validated immediately. Remote JSON subscriptions require HTTPS and retain last-known-good content when refresh fails.",
         "operationId": "post_panel_api_clients_email_externalLinks",
         "parameters": [
           {
@@ -5765,14 +5842,19 @@
               "example": {
                 "externalLinks": [
                   {
-                    "kind": "link",
-                    "value": "vless://uuid@host:443?...#srv",
-                    "remark": "DE"
+                    "kind": "json",
+                    "value": "{\"outbounds\":[...]}",
+                    "remark": "Manual",
+                    "enabled": true
                   },
                   {
-                    "kind": "subscription",
-                    "value": "https://provider.example/sub/abc",
-                    "remark": "Provider"
+                    "kind": "json_subscription",
+                    "value": "https://provider.example/config.json",
+                    "remark": "Provider",
+                    "updateIntervalMinutes": 60,
+                    "timeoutSeconds": 8,
+                    "maxResponseBytes": 2097152,
+                    "maxRedirects": 3
                   }
                 ]
               }
@@ -5798,6 +5880,250 @@
                 },
                 "example": {
                   "success": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/panel/api/clients/{email}/subscriptionProfile": {
+      "get": {
+        "tags": [
+          "Clients"
+        ],
+        "summary": "Read the per-client Happ subscription profile, status, validation timestamps, and lowest-delay selection settings.",
+        "operationId": "get_panel_api_clients_email_subscriptionProfile",
+        "parameters": [
+          {
+            "name": "email",
+            "in": "path",
+            "required": true,
+            "description": "Client email.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "msg": {
+                      "type": "string"
+                    },
+                    "obj": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Clients"
+        ],
+        "summary": "Create or update the per-client Happ profile. Enabling automatic lowest-delay selection requires a valid eight-character Happ Provider ID.",
+        "operationId": "post_panel_api_clients_email_subscriptionProfile",
+        "parameters": [
+          {
+            "name": "email",
+            "in": "path",
+            "required": true,
+            "description": "Client email.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "msg": {
+                      "type": "string"
+                    },
+                    "obj": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/panel/api/clients/{email}/happPreview": {
+      "get": {
+        "tags": [
+          "Clients"
+        ],
+        "summary": "Generate, allowlist, merge, and Xray-validate the current Happ JSON document, returning it in the authenticated API envelope.",
+        "operationId": "get_panel_api_clients_email_happPreview",
+        "parameters": [
+          {
+            "name": "email",
+            "in": "path",
+            "required": true,
+            "description": "Client email.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "msg": {
+                      "type": "string"
+                    },
+                    "obj": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/panel/api/clients/{email}/happRegenerate": {
+      "post": {
+        "tags": [
+          "Clients"
+        ],
+        "summary": "Refresh enabled remote JSON sources, retain last-known-good data on partial failure, then regenerate and validate the Happ JSON document.",
+        "operationId": "post_panel_api_clients_email_happRegenerate",
+        "parameters": [
+          {
+            "name": "email",
+            "in": "path",
+            "required": true,
+            "description": "Client email.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "msg": {
+                      "type": "string"
+                    },
+                    "obj": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/panel/api/clients/{email}/ipLimitEvents": {
+      "get": {
+        "tags": [
+          "Clients"
+        ],
+        "summary": "Return the most recent parsed IP-limit ban and unban events for one exact client email without exposing unrelated log lines.",
+        "operationId": "get_panel_api_clients_email_ipLimitEvents",
+        "parameters": [
+          {
+            "name": "email",
+            "in": "path",
+            "required": true,
+            "description": "Client email.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "msg": {
+                      "type": "string"
+                    },
+                    "obj": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/panel/api/clients/externalSources/{id}/refresh": {
+      "post": {
+        "tags": [
+          "Clients"
+        ],
+        "summary": "Refresh one HTTPS JSON source with SSRF, redirect, timeout, content-type, and response-size controls.",
+        "operationId": "post_panel_api_clients_externalSources_id_refresh",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "External source ID.",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "msg": {
+                      "type": "string"
+                    },
+                    "obj": {}
+                  }
                 }
               }
             }
@@ -7421,6 +7747,196 @@
                   "obj": [
                     "vless://uuid@host:443?...#user1"
                   ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/panel/api/directDomains/list": {
+      "get": {
+        "tags": [
+          "Direct domains"
+        ],
+        "summary": "List global domains or a client scope, optionally including global rows.",
+        "operationId": "get_panel_api_directDomains_list",
+        "parameters": [
+          {
+            "name": "clientEmail",
+            "in": "query",
+            "required": false,
+            "description": "Omit for the global scope.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "includeGlobal",
+            "in": "query",
+            "required": false,
+            "description": "Use 1 to include global rows with a client scope.",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "msg": {
+                      "type": "string"
+                    },
+                    "obj": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/panel/api/directDomains/upsert": {
+      "post": {
+        "tags": [
+          "Direct domains"
+        ],
+        "summary": "Normalize and create or update one direct domain or client exclusion.",
+        "operationId": "post_panel_api_directDomains_upsert",
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "msg": {
+                      "type": "string"
+                    },
+                    "obj": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/panel/api/directDomains/import": {
+      "post": {
+        "tags": [
+          "Direct domains"
+        ],
+        "summary": "Normalize, deduplicate, and transactionally import a mixed multiline domain list.",
+        "operationId": "post_panel_api_directDomains_import",
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "msg": {
+                      "type": "string"
+                    },
+                    "obj": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/panel/api/directDomains/replace": {
+      "post": {
+        "tags": [
+          "Direct domains"
+        ],
+        "summary": "Transactionally replace all per-client additions and global-list exclusions for one client.",
+        "operationId": "post_panel_api_directDomains_replace",
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "msg": {
+                      "type": "string"
+                    },
+                    "obj": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/panel/api/directDomains/del/{id}": {
+      "post": {
+        "tags": [
+          "Direct domains"
+        ],
+        "summary": "Delete a direct-domain row only from the requested global or client scope.",
+        "operationId": "post_panel_api_directDomains_del_id",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Direct-domain row ID.",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "clientEmail",
+            "in": "query",
+            "required": false,
+            "description": "Required for a client-scoped row.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "msg": {
+                      "type": "string"
+                    },
+                    "obj": {}
+                  }
                 }
               }
             }

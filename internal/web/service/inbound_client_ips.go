@@ -1,12 +1,14 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"sort"
 	"time"
 
 	"github.com/mhsanaei/3x-ui/v3/internal/database"
 	"github.com/mhsanaei/3x-ui/v3/internal/database/model"
+	"github.com/mhsanaei/3x-ui/v3/internal/web/runtime"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -30,30 +32,45 @@ const clientIpStaleAfterSeconds = int64(30 * 60)
 type clientIpEntry struct {
 	IP        string `json:"ip"`
 	Timestamp int64  `json:"timestamp"`
+	FirstSeen int64  `json:"firstSeen,omitempty"`
 }
 
 // mergeClientIpEntries unions old and incoming IP observations, dropping anything
 // older than cutoff, keeping the most recent timestamp per IP, and returning the
 // result sorted newest-first.
 func mergeClientIpEntries(old, incoming []clientIpEntry, cutoff int64) []clientIpEntry {
-	ipMap := make(map[string]int64, len(old)+len(incoming))
+	ipMap := make(map[string]clientIpEntry, len(old)+len(incoming))
 	for _, e := range old {
 		if e.Timestamp < cutoff {
 			continue
 		}
-		ipMap[e.IP] = e.Timestamp
+		if e.FirstSeen <= 0 {
+			e.FirstSeen = e.Timestamp
+		}
+		ipMap[e.IP] = e
 	}
 	for _, e := range incoming {
 		if e.Timestamp < cutoff {
 			continue
 		}
-		if cur, ok := ipMap[e.IP]; !ok || e.Timestamp > cur {
-			ipMap[e.IP] = e.Timestamp
+		if e.FirstSeen <= 0 {
+			e.FirstSeen = e.Timestamp
+		}
+		if cur, ok := ipMap[e.IP]; !ok {
+			ipMap[e.IP] = e
+		} else {
+			if e.Timestamp > cur.Timestamp {
+				cur.Timestamp = e.Timestamp
+			}
+			if e.FirstSeen > 0 && (cur.FirstSeen <= 0 || e.FirstSeen < cur.FirstSeen) {
+				cur.FirstSeen = e.FirstSeen
+			}
+			ipMap[e.IP] = cur
 		}
 	}
 	out := make([]clientIpEntry, 0, len(ipMap))
-	for ip, ts := range ipMap {
-		out = append(out, clientIpEntry{IP: ip, Timestamp: ts})
+	for _, entry := range ipMap {
+		out = append(out, entry)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Timestamp > out[j].Timestamp })
 	return out
@@ -219,13 +236,51 @@ func (s *InboundService) GetInboundClientIps(clientEmail string) (string, error)
 
 func (s *InboundService) ClearClientIps(clientEmail string) error {
 	db := database.GetDB()
+	return db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(model.InboundClientIps{}).
+			Where("client_email = ?", clientEmail).
+			Update("ips", "").Error; err != nil {
+			return err
+		}
+		return tx.Where("email = ?", clientEmail).Delete(&model.NodeClientIp{}).Error
+	})
+}
 
-	result := db.Model(model.InboundClientIps{}).
-		Where("client_email = ?", clientEmail).
-		Update("ips", "")
-	err := result.Error
-	if err != nil {
-		return err
+type clientIpResetRuntime interface {
+	ClearClientIps(context.Context, string) error
+}
+
+func (s *InboundService) ClearClientIpsCluster(ctx context.Context, clientEmail string) ([]string, error) {
+	if err := s.ClearClientIps(clientEmail); err != nil {
+		return nil, err
 	}
-	return nil
+	var nodes []model.Node
+	if err := database.GetDB().Where("enable = ?", true).Order("id ASC").Find(&nodes).Error; err != nil {
+		return nil, err
+	}
+	manager := runtime.GetManager()
+	if manager == nil {
+		return nil, nil
+	}
+	failed := make([]string, 0)
+	for index := range nodes {
+		node := &nodes[index]
+		rt, err := manager.RuntimeFor(&node.Id)
+		if err != nil {
+			failed = append(failed, node.Name)
+			continue
+		}
+		resetter, ok := rt.(clientIpResetRuntime)
+		if !ok {
+			failed = append(failed, node.Name)
+			continue
+		}
+		nodeCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+		err = resetter.ClearClientIps(nodeCtx, clientEmail)
+		cancel()
+		if err != nil {
+			failed = append(failed, node.Name)
+		}
+	}
+	return failed, nil
 }

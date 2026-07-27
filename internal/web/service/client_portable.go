@@ -8,6 +8,7 @@ import (
 
 	"github.com/mhsanaei/3x-ui/v3/internal/database"
 	"github.com/mhsanaei/3x-ui/v3/internal/database/model"
+	"github.com/mhsanaei/3x-ui/v3/internal/util/common"
 	"github.com/mhsanaei/3x-ui/v3/internal/xray"
 
 	"gorm.io/gorm"
@@ -68,6 +69,9 @@ func (s *ClientService) ImportClients(inboundSvc *InboundService, items []Client
 	result := BulkCreateResult{}
 	if len(items) == 0 {
 		return result, false, nil
+	}
+	if len(items) > MaxClientImportRows {
+		return result, false, common.NewError("client import exceeds the 1000-row limit")
 	}
 
 	attached := make([]ClientCreatePayload, 0, len(items))

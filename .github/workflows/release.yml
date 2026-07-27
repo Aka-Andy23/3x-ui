@@ -119,34 +119,35 @@ jobs:
 
           # Download dependencies
           Xray_URL="https://github.com/XTLS/Xray-core/releases/download/v26.7.11/"
+          download_xray() {
+            local archive="$1"
+            wget -q "${Xray_URL}${archive}"
+            wget -q "${Xray_URL}${archive}.dgst"
+            local expected
+            expected=$(sed -n 's/^SHA2-256= *//p' "${archive}.dgst")
+            local actual
+            actual=$(sha256sum "${archive}" | awk '{print $1}')
+            if [[ -z "${expected}" || "${expected}" != "${actual}" ]]; then
+              echo "Xray SHA-256 verification failed for ${archive}"
+              exit 1
+            fi
+            unzip "${archive}"
+            rm -f "${archive}" "${archive}.dgst"
+          }
           if [ "${{ matrix.platform }}" == "amd64" ]; then
-            wget -q ${Xray_URL}Xray-linux-64.zip
-            unzip Xray-linux-64.zip
-            rm -f Xray-linux-64.zip
+            download_xray Xray-linux-64.zip
           elif [ "${{ matrix.platform }}" == "arm64" ]; then
-            wget -q ${Xray_URL}Xray-linux-arm64-v8a.zip
-            unzip Xray-linux-arm64-v8a.zip
-            rm -f Xray-linux-arm64-v8a.zip
+            download_xray Xray-linux-arm64-v8a.zip
           elif [ "${{ matrix.platform }}" == "armv7" ]; then
-            wget -q ${Xray_URL}Xray-linux-arm32-v7a.zip
-            unzip Xray-linux-arm32-v7a.zip
-            rm -f Xray-linux-arm32-v7a.zip
+            download_xray Xray-linux-arm32-v7a.zip
           elif [ "${{ matrix.platform }}" == "armv6" ]; then
-            wget -q ${Xray_URL}Xray-linux-arm32-v6.zip
-            unzip Xray-linux-arm32-v6.zip
-            rm -f Xray-linux-arm32-v6.zip
+            download_xray Xray-linux-arm32-v6.zip
           elif [ "${{ matrix.platform }}" == "386" ]; then
-            wget -q ${Xray_URL}Xray-linux-32.zip
-            unzip Xray-linux-32.zip
-            rm -f Xray-linux-32.zip
+            download_xray Xray-linux-32.zip
           elif [ "${{ matrix.platform }}" == "armv5" ]; then
-            wget -q ${Xray_URL}Xray-linux-arm32-v5.zip
-            unzip Xray-linux-arm32-v5.zip
-            rm -f Xray-linux-arm32-v5.zip
+            download_xray Xray-linux-arm32-v5.zip
           elif [ "${{ matrix.platform }}" == "s390x" ]; then
-            wget -q ${Xray_URL}Xray-linux-s390x.zip
-            unzip Xray-linux-s390x.zip
-            rm -f Xray-linux-s390x.zip
+            download_xray Xray-linux-s390x.zip
           fi
           rm -f geoip.dat geosite.dat
           wget -q https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat
@@ -275,8 +276,14 @@ jobs:
           # Download Xray for Windows
           $Xray_URL = "https://github.com/XTLS/Xray-core/releases/download/v26.7.11/"
           Invoke-WebRequest -Uri "${Xray_URL}Xray-windows-64.zip" -OutFile "Xray-windows-64.zip"
+          Invoke-WebRequest -Uri "${Xray_URL}Xray-windows-64.zip.dgst" -OutFile "Xray-windows-64.zip.dgst"
+          $ExpectedXraySha256 = ((Select-String -Path "Xray-windows-64.zip.dgst" -Pattern "^SHA2-256=").Line -replace "^SHA2-256=\s*", "").ToLowerInvariant()
+          $ActualXraySha256 = (Get-FileHash -Path "Xray-windows-64.zip" -Algorithm SHA256).Hash.ToLowerInvariant()
+          if (-not $ExpectedXraySha256 -or $ExpectedXraySha256 -ne $ActualXraySha256) {
+            throw "Xray SHA-256 verification failed for Xray-windows-64.zip"
+          }
           Expand-Archive -Path "Xray-windows-64.zip" -DestinationPath .
-          Remove-Item "Xray-windows-64.zip"
+          Remove-Item "Xray-windows-64.zip", "Xray-windows-64.zip.dgst"
           Remove-Item geoip.dat, geosite.dat -ErrorAction SilentlyContinue
           Invoke-WebRequest -Uri "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat" -OutFile "geoip.dat"
           Invoke-WebRequest -Uri "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat" -OutFile "geosite.dat"

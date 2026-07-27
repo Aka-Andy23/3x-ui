@@ -134,7 +134,7 @@ func TestGetClientIpsWithNodes_LabelsNodes(t *testing.T) {
 	}
 
 	// Flat display set (what the IP-log lists) holds both IPs.
-	flat, _ := json.Marshal([]model.ClientIpEntry{{IP: "1.1.1.1", Timestamp: now}, {IP: "2.2.2.2", Timestamp: now}})
+	flat, _ := json.Marshal([]model.ClientIpEntry{{IP: "1.1.1.1", Timestamp: now, FirstSeen: now - 60}, {IP: "2.2.2.2", Timestamp: now, FirstSeen: now - 30}})
 	if err := db.Create(&model.InboundClientIps{ClientEmail: "u@x", Ips: string(flat)}).Error; err != nil {
 		t.Fatalf("seed flat ips: %v", err)
 	}
@@ -158,6 +158,9 @@ func TestGetClientIpsWithNodes_LabelsNodes(t *testing.T) {
 	byIP := map[string]string{}
 	for _, in := range infos {
 		byIP[in.IP] = in.Node
+		if in.FirstSeen == "" || in.LastSeen == "" {
+			t.Fatalf("first/last seen missing for %s: %+v", in.IP, in)
+		}
 	}
 	if byIP["1.1.1.1"] != "" {
 		t.Fatalf("local IP should have empty node, got %q", byIP["1.1.1.1"])

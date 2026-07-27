@@ -30,6 +30,9 @@ export default function SubscriptionGeneralTab({ allSetting, updateSetting }: Su
             <SettingListItem paddings="small" title={t('pages.settings.subJsonEnableTitle')} description={t('pages.settings.subJsonEnable')}>
               <Switch checked={allSetting.subJsonEnable} onChange={(v) => updateSetting({ subJsonEnable: v })} />
             </SettingListItem>
+            <SettingListItem paddings="small" title={t('happ.settingsEnableTitle')} description={t('happ.settingsEnableDesc')}>
+              <Switch checked={allSetting.subHappEnable} onChange={(v) => updateSetting({ subHappEnable: v })} />
+            </SettingListItem>
             <SettingListItem paddings="small" title={t('pages.settings.subClashEnableTitle')}>
               <Switch checked={allSetting.subClashEnable} onChange={(v) => updateSetting({ subClashEnable: v })} />
             </SettingListItem>

@@ -93,6 +93,10 @@ var defaultValueMap = map[string]string{
 	"subURI":                      "",
 	"subJsonPath":                 "/json/",
 	"subJsonURI":                  "",
+	"subHappEnable":               "true",
+	"subHappPath":                 "/happ/",
+	"subHappURI":                  "",
+	"happProviderId":              "",
 	"subClashEnable":              "false",
 	"subClashPath":                "/clash/",
 	"subClashURI":                 "",
@@ -799,6 +803,22 @@ func (s *SettingService) GetSubJsonURI() (string, error) {
 	return s.getString("subJsonURI")
 }
 
+func (s *SettingService) GetSubHappEnable() (bool, error) {
+	return s.getBool("subHappEnable")
+}
+
+func (s *SettingService) GetSubHappPath() (string, error) {
+	return s.getString("subHappPath")
+}
+
+func (s *SettingService) GetSubHappURI() (string, error) {
+	return s.getString("subHappURI")
+}
+
+func (s *SettingService) GetHappProviderID() (string, error) {
+	return s.getString("happProviderId")
+}
+
 func (s *SettingService) GetSubClashEnable() (bool, error) {
 	return s.getBool("subClashEnable")
 }
@@ -1271,10 +1291,12 @@ func (s *SettingService) GetDefaultSettings(host string) (any, error) {
 		"subThemeDir":      func() (any, error) { return s.GetSubThemeDir() },
 		"subEnable":        func() (any, error) { return s.GetSubEnable() },
 		"subJsonEnable":    func() (any, error) { return s.GetSubJsonEnable() },
+		"subHappEnable":    func() (any, error) { return s.GetSubHappEnable() },
 		"subClashEnable":   func() (any, error) { return s.GetSubClashEnable() },
 		"subTitle":         func() (any, error) { return s.GetSubTitle() },
 		"subURI":           func() (any, error) { return s.GetSubURI() },
 		"subJsonURI":       func() (any, error) { return s.GetSubJsonURI() },
+		"subHappURI":       func() (any, error) { return s.GetSubHappURI() },
 		"subClashURI":      func() (any, error) { return s.GetSubClashURI() },
 		"datepicker":       func() (any, error) { return s.GetDatepicker() },
 		"ipLimitEnable":    func() (any, error) { return s.GetIpLimitEnable() },
@@ -1308,11 +1330,18 @@ func (s *SettingService) GetDefaultSettings(host string) (any, error) {
 			subClashEnable = b
 		}
 	}
-	if (subEnable && result["subURI"].(string) == "") || (subJsonEnable && result["subJsonURI"].(string) == "") || (subClashEnable && result["subClashURI"].(string) == "") {
+	subHappEnable := false
+	if v, ok := result["subHappEnable"]; ok {
+		if b, ok2 := v.(bool); ok2 {
+			subHappEnable = b
+		}
+	}
+	if (subEnable && result["subURI"].(string) == "") || (subJsonEnable && result["subJsonURI"].(string) == "") || (subHappEnable && result["subHappURI"].(string) == "") || (subClashEnable && result["subClashURI"].(string) == "") {
 		subURI := s.BuildSubURIBase(host)
 		subTitle, _ := s.GetSubTitle()
 		subPath, _ := s.GetSubPath()
 		subJsonPath, _ := s.GetSubJsonPath()
+		subHappPath, _ := s.GetSubHappPath()
 		subClashPath, _ := s.GetSubClashPath()
 		if subEnable && result["subURI"].(string) == "" {
 			result["subURI"] = subURI + subPath
@@ -1322,6 +1351,9 @@ func (s *SettingService) GetDefaultSettings(host string) (any, error) {
 		}
 		if subJsonEnable && result["subJsonURI"].(string) == "" {
 			result["subJsonURI"] = subURI + subJsonPath
+		}
+		if subHappEnable && result["subHappURI"].(string) == "" {
+			result["subHappURI"] = subURI + subHappPath
 		}
 		if subClashEnable && result["subClashURI"].(string) == "" {
 			result["subClashURI"] = subURI + subClashPath

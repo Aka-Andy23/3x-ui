@@ -15,15 +15,16 @@ import (
 // APIController handles the main API routes for the 3x-ui panel, including inbounds and server management.
 type APIController struct {
 	BaseController
-	inboundController     *InboundController
-	serverController      *ServerController
-	nodeController        *NodeController
-	hostController        *HostController
-	settingController     *SettingController
-	xraySettingController *XraySettingController
-	userService           panel.UserService
-	apiTokenService       panel.ApiTokenService
-	Tgbot                 tgbot.Tgbot
+	inboundController      *InboundController
+	serverController       *ServerController
+	nodeController         *NodeController
+	hostController         *HostController
+	directDomainController *DirectDomainController
+	settingController      *SettingController
+	xraySettingController  *XraySettingController
+	userService            panel.UserService
+	apiTokenService        panel.ApiTokenService
+	Tgbot                  tgbot.Tgbot
 }
 
 // NewAPIController creates a new APIController instance and initializes its routes.
@@ -97,6 +98,9 @@ func (a *APIController) initRouter(g *gin.RouterGroup) {
 	// Hosts API — per-inbound override endpoints for subscription links
 	hosts := api.Group("/hosts")
 	a.hostController = NewHostController(hosts)
+
+	directDomains := api.Group("/directDomains")
+	a.directDomainController = NewDirectDomainController(directDomains)
 
 	// Settings + Xray config management live under the API surface too, so the
 	// same API token drives them. Paths are /panel/api/setting/* and
